@@ -89,9 +89,12 @@ class OranDataRepositorySqlite : public OranDataRepository
     uint64_t RegisterNode(OranNearRtRic::NodeType type, uint64_t id) override;
     uint64_t RegisterNodeLteUe(uint64_t id, uint64_t imsi) override;
     uint64_t RegisterNodeLteEnb(uint64_t id, uint16_t cellId) override;
+    uint64_t RegisterNodeNrGnb(uint64_t id, uint16_t cellId) override;
+    uint64_t RegisterNodeNrUe(uint64_t id, uint64_t imsi) override;
     uint64_t DeregisterNode(uint64_t e2NodeId) override;
     void SavePosition(uint64_t e2NodeId, Vector pos, Time t) override;
     void SaveLteUeCellInfo(uint64_t e2NodeId, uint16_t cellId, uint16_t rnti, Time t) override;
+    void SaveNrUeCellInfo(uint64_t e2NodeId, uint16_t cellId, uint16_t rnti, Time t) override;
     void SaveAppLoss(uint64_t e2NodeId, double appLoss, Time t) override;
     void SaveLteUeRsrpRsrq(uint64_t e2NodeId,
                            Time t,
@@ -111,6 +114,11 @@ class OranDataRepositorySqlite : public OranDataRepository
     uint64_t GetLteUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) override;
     std::tuple<bool, uint16_t> GetLteEnbCellInfo(uint64_t e2NodeId) override;
     std::vector<uint64_t> GetLteEnbE2NodeIds() override;
+    std::tuple<bool, uint16_t, uint16_t> GetNrUeCellInfo(uint64_t e2NodeId) override;
+    std::vector<uint64_t> GetNrUeE2NodeIds() override;
+    uint64_t GetNrUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) override;
+    std::tuple<bool, uint16_t> GetNrGnbCellInfo(uint64_t e2NodeId) override;
+    std::vector<uint64_t> GetNrGnbE2NodeIds() override;
     std::vector<std::tuple<uint64_t, Time>> GetLastRegistrationRequests() override;
     double GetAppLoss(uint64_t e2NodeId) override;
     std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>> GetLteUeRsrpRsrq(
@@ -155,6 +163,14 @@ class OranDataRepositorySqlite : public OranDataRepository
         INSERT_NODE_LOCATION,              //!< Add an E2 node's location
         INSERT_NODE_REGISTRATION,          //!< Add an E2 node registration request
         INSERT_LTE_UE_RSRP_RSRQ,           //!< Add LTE UE RSRP and RSRQ
+        GET_NR_ALL_GNB_E2NODEIDS,          //!< Get all NR gNB E2 IDs
+        GET_NR_ALL_UE_E2NODEIDS,           //!< Get all NR UE E2 IDs
+        GET_NR_CELLID_FROM_E2NODEID,       //!< Get the cell ID of an NR gNB from its E2 Node ID
+        GET_NR_UE_CELLINFO,                //!< Get the cell information associated with NR UE
+        GET_NR_UE_E2NODEID_FROM_CELLINFO,  //!< Get the E2 ID of a UE from the NR cell information
+        INSERT_NR_GNB_NODE,                //!< Add an NR gNB E2 node
+        INSERT_NR_UE_NODE,                 //!< Add an NR UE E2 node
+        INSERT_NR_UE_CELL,                 //!< Add NR UE cell information for an E2 node
         LOG_CMM_ACTION,                    //!< Log a CM module action
         LOG_E2TERMINATOR_COMMAND,          //!< Log an E2 terminator command from the RIC
         LOG_LM_ACTION,                     //!< Log an LM action
@@ -185,6 +201,15 @@ class OranDataRepositorySqlite : public OranDataRepository
         TABLE_LTE_UE,             //!< Table with LTE UE information
         TABLE_LTE_UE_CELL,        //!< Table with LTE UE Cell Information
         TABLE_LTE_UE_RSRP_RSRQ,   //!< Table with LTE UE RSRP and RSRQ Information
+        TABLE_NR_GNB,             //!< Table with NR gNB information
+        TABLE_NR_UE,              //!< Table with NR UE information
+        TABLE_NR_UE_CELL,         //!< Table with NR UE Cell Information
+        INDEX_NR_GNB_NODEID,      //!< Index for the table with NR gNB based on E2 Node IDs
+        INDEX_NR_GNB_CELLID,      //!< Index for the table with NR gNB based on Cell IDs
+        INDEX_NR_UE_NODEID,       //!< Index for the table with NR UE based on E2 Node ID
+        INDEX_NR_UE_IMSI,         //!< Index for the table with NR UE based on IMSI
+        INDEX_NR_UE_CELL_NODEID,  //!< Index for NR UE Cell Information based on E2 Node IDs
+        INDEX_NR_UE_CELL_CELLID,  //!< Index for NR UE Cell Information based on Cell IDs
         TABLE_NODE,               //!< Table with E2 Node Information
         TABLE_NODE_LOCATION,      //!< Table with Node Locations
         TABLE_NODE_REGISTRATION,  //!< Table with Node Registrations
