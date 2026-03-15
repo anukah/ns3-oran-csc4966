@@ -243,6 +243,55 @@ OranDataRepositorySqlite::RegisterNodeLteEnb(uint64_t id, uint16_t cellId)
 }
 
 uint64_t
+OranDataRepositorySqlite::RegisterNodeNrGnb(uint64_t id, uint16_t cellId)
+{
+    NS_LOG_FUNCTION(this << id << cellId);
+
+    uint64_t e2NodeId = 0;
+
+    if (m_active)
+    {
+        int rc;
+        sqlite3_stmt* stmt = nullptr;
+        e2NodeId = RegisterNode(OranNearRtRic::NodeType::NRGNB, id);
+
+        sqlite3_prepare_v2(m_db, m_queryStmtsStrings[INSERT_NR_GNB_NODE].c_str(), -1, &stmt, 0);
+
+        sqlite3_bind_int64(stmt, 1, id);
+        sqlite3_bind_int(stmt, 2, cellId);
+
+        rc = sqlite3_step(stmt);
+        CheckQueryReturnCode(stmt, rc, FormatBoundArgsList(id, cellId));
+        sqlite3_finalize(stmt);
+    }
+    return e2NodeId;
+}
+
+uint64_t
+OranDataRepositorySqlite::RegisterNodeNrUe(uint64_t id, uint64_t imsi)
+{
+    NS_LOG_FUNCTION(this);
+    uint64_t e2NodeId = 0;
+
+    if (m_active)
+    {
+        int rc;
+        sqlite3_stmt* stmt = nullptr;
+        e2NodeId = RegisterNode(OranNearRtRic::NodeType::NRUE, id);
+
+        sqlite3_prepare_v2(m_db, m_queryStmtsStrings[INSERT_NR_UE_NODE].c_str(), -1, &stmt, 0);
+
+        sqlite3_bind_int64(stmt, 1, id);
+        sqlite3_bind_int64(stmt, 2, imsi);
+
+        rc = sqlite3_step(stmt);
+        CheckQueryReturnCode(stmt, rc, FormatBoundArgsList(id, imsi));
+        sqlite3_finalize(stmt);
+    }
+    return e2NodeId;
+}
+
+uint64_t
 OranDataRepositorySqlite::DeregisterNode(uint64_t e2NodeId)
 {
     NS_LOG_FUNCTION(this << e2NodeId);
@@ -324,6 +373,37 @@ OranDataRepositorySqlite::SaveLteUeCellInfo(uint64_t e2NodeId,
             sqlite3_stmt* stmt = nullptr;
 
             sqlite3_prepare_v2(m_db, m_queryStmtsStrings[INSERT_LTE_UE_CELL].c_str(), -1, &stmt, 0);
+
+            sqlite3_bind_int64(stmt, 1, e2NodeId);
+            sqlite3_bind_int(stmt, 2, cellId);
+            sqlite3_bind_int(stmt, 3, rnti);
+            sqlite3_bind_int64(stmt, 4, t.GetTimeStep());
+
+            rc = sqlite3_step(stmt);
+            CheckQueryReturnCode(stmt,
+                                 rc,
+                                 FormatBoundArgsList(e2NodeId, cellId, rnti, t.GetTimeStep()));
+            sqlite3_finalize(stmt);
+        }
+    }
+}
+
+void
+OranDataRepositorySqlite::SaveNrUeCellInfo(uint64_t e2NodeId,
+                                            uint16_t cellId,
+                                            uint16_t rnti,
+                                            Time t)
+{
+    NS_LOG_FUNCTION(this << e2NodeId << (uint32_t)cellId << (uint32_t)rnti << t);
+
+    if (m_active)
+    {
+        if (IsNodeRegistered(e2NodeId))
+        {
+            int rc;
+            sqlite3_stmt* stmt = nullptr;
+
+            sqlite3_prepare_v2(m_db, m_queryStmtsStrings[INSERT_NR_UE_CELL].c_str(), -1, &stmt, 0);
 
             sqlite3_bind_int64(stmt, 1, e2NodeId);
             sqlite3_bind_int(stmt, 2, cellId);
@@ -669,6 +749,164 @@ OranDataRepositorySqlite::GetLteEnbE2NodeIds()
     return e2NodeIds;
 }
 
+std::tuple<bool, uint16_t, uint16_t>
+OranDataRepositorySqlite::GetNrUeCellInfo(uint64_t e2NodeId)
+{
+    NS_LOG_FUNCTION(this << e2NodeId);
+
+    auto retVal = std::make_tuple(false, 0, 0);
+    if (m_active)
+    {
+        if (IsNodeRegistered(e2NodeId))
+        {
+            int rc;
+            sqlite3_stmt* stmt = nullptr;
+
+            sqlite3_prepare_v2(m_db,
+                               m_queryStmtsStrings[GET_NR_UE_CELLINFO].c_str(),
+                               -1,
+                               &stmt,
+                               0);
+            sqlite3_bind_int64(stmt, 1, e2NodeId);
+
+            while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+            {
+                uint16_t cellId = sqlite3_column_int(stmt, 0);
+                uint16_t rnti = sqlite3_column_int(stmt, 1);
+                retVal = std::make_tuple(true, cellId, rnti);
+            }
+
+            CheckQueryReturnCode(stmt, rc, FormatBoundArgsList(e2NodeId));
+            sqlite3_finalize(stmt);
+        }
+    }
+    return retVal;
+}
+
+std::vector<uint64_t>
+OranDataRepositorySqlite::GetNrUeE2NodeIds()
+{
+    NS_LOG_FUNCTION(this);
+
+    std::vector<uint64_t> e2NodeIds;
+
+    if (m_active)
+    {
+        int rc;
+        sqlite3_stmt* stmt = nullptr;
+
+        if (sqlite3_prepare_v2(m_db,
+                               m_queryStmtsStrings[GET_NR_ALL_UE_E2NODEIDS].c_str(),
+                               -1,
+                               &stmt,
+                               0) != SQLITE_OK)
+        {
+            std::cerr << "SQL Error: " << sqlite3_errmsg(m_db) << std::endl;
+        }
+
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+        {
+            e2NodeIds.push_back(sqlite3_column_int64(stmt, 0));
+        }
+
+        CheckQueryReturnCode(stmt, rc);
+        sqlite3_finalize(stmt);
+    }
+    return e2NodeIds;
+}
+
+uint64_t
+OranDataRepositorySqlite::GetNrUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti)
+{
+    NS_LOG_FUNCTION(this << cellId << rnti);
+
+    uint64_t id = 0;
+    if (m_active)
+    {
+        int rc;
+        sqlite3_stmt* stmt = nullptr;
+
+        sqlite3_prepare_v2(m_db,
+                           m_queryStmtsStrings[GET_NR_UE_E2NODEID_FROM_CELLINFO].c_str(),
+                           -1,
+                           &stmt,
+                           0);
+        sqlite3_bind_int(stmt, 1, cellId);
+        sqlite3_bind_int(stmt, 2, rnti);
+
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+        {
+            id = sqlite3_column_int64(stmt, 0);
+        }
+
+        CheckQueryReturnCode(stmt, rc, FormatBoundArgsList(cellId, rnti));
+        sqlite3_finalize(stmt);
+    }
+    return id;
+}
+
+std::tuple<bool, uint16_t>
+OranDataRepositorySqlite::GetNrGnbCellInfo(uint64_t e2NodeId)
+{
+    NS_LOG_FUNCTION(this << e2NodeId);
+
+    auto retVal = std::make_tuple(false, 0);
+    if (m_active)
+    {
+        if (IsNodeRegistered(e2NodeId))
+        {
+            int rc;
+            sqlite3_stmt* stmt = nullptr;
+
+            sqlite3_prepare_v2(m_db,
+                               m_queryStmtsStrings[GET_NR_CELLID_FROM_E2NODEID].c_str(),
+                               -1,
+                               &stmt,
+                               0);
+            sqlite3_bind_int64(stmt, 1, e2NodeId);
+
+            while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+            {
+                uint16_t cellId = sqlite3_column_int(stmt, 0);
+                retVal = std::make_tuple(true, cellId);
+            }
+
+            CheckQueryReturnCode(stmt, rc, FormatBoundArgsList(e2NodeId));
+            sqlite3_finalize(stmt);
+        }
+    }
+    return retVal;
+}
+
+std::vector<uint64_t>
+OranDataRepositorySqlite::GetNrGnbE2NodeIds()
+{
+    NS_LOG_FUNCTION(this);
+
+    std::vector<uint64_t> e2NodeIds;
+
+    if (m_active)
+    {
+        int rc;
+        sqlite3_stmt* stmt = nullptr;
+
+        sqlite3_prepare_v2(m_db,
+                           m_queryStmtsStrings[GET_NR_ALL_GNB_E2NODEIDS].c_str(),
+                           -1,
+                           &stmt,
+                           0);
+
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+        {
+            e2NodeIds.push_back(sqlite3_column_int64(stmt, 0));
+        }
+
+        CheckQueryReturnCode(stmt, rc);
+        sqlite3_finalize(stmt);
+    }
+    return e2NodeIds;
+}
+
 std::vector<std::tuple<uint64_t, Time>>
 OranDataRepositorySqlite::GetLastRegistrationRequests()
 {
@@ -983,6 +1221,21 @@ OranDataRepositorySqlite::InitDb()
     RunCreateStatement(m_createStmtsStrings[INDEX_LTE_UE_CELL_NODEID]);
     RunCreateStatement(m_createStmtsStrings[INDEX_LTE_UE_CELL_CELLID]);
 
+    // NR gNB
+    RunCreateStatement(m_createStmtsStrings[TABLE_NR_GNB]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_GNB_NODEID]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_GNB_CELLID]);
+
+    // NR UE
+    RunCreateStatement(m_createStmtsStrings[TABLE_NR_UE]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_NODEID]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_IMSI]);
+
+    // NR UE Cell Information
+    RunCreateStatement(m_createStmtsStrings[TABLE_NR_UE_CELL]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_CELL_NODEID]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_CELL_CELLID]);
+
     RunCreateStatement(m_createStmtsStrings[TABLE_APPLOSS_COMMAND]);
 
     // E2 Terminator Commands
@@ -1086,6 +1339,44 @@ OranDataRepositorySqlite::InitStatements()
         "ccid           BOOLEAN                           NOT NULL, "
         "FOREIGN KEY(cellid) REFERENCES lteenb(cellid), "
         "FOREIGN KEY(nodeid) REFERENCES lteue(nodeid));";
+
+    m_createStmtsStrings[TABLE_NR_GNB] = "CREATE TABLE IF NOT EXISTS nrgnb ("
+                                        "nodeid INTEGER PRIMARY KEY NOT NULL, "
+                                        "cellid INTEGER             NOT NULL, "
+                                        "FOREIGN KEY(nodeid) REFERENCES node(nodeid));";
+
+    m_createStmtsStrings[TABLE_NR_UE] = "CREATE TABLE IF NOT EXISTS nrue ("
+                                        "nodeid INTEGER PRIMARY KEY NOT NULL, "
+                                        "imsi   INTEGER UNIQUE      NOT NULL, "
+                                        "FOREIGN KEY(nodeid) REFERENCES node(nodeid));";
+
+    m_createStmtsStrings[TABLE_NR_UE_CELL] =
+        "CREATE TABLE IF NOT EXISTS nruecell ("
+        "entryid        INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "
+        "nodeid         INTEGER                           NOT NULL, "
+        "cellid         INTEGER                           NOT NULL, "
+        "rnti           INTEGER                           NOT NULL, "
+        "simulationtime INTEGER                           NOT NULL, "
+        "FOREIGN KEY(cellid) REFERENCES nrgnb(cellid), "
+        "FOREIGN KEY(nodeid) REFERENCES nrue(nodeid));";
+
+    m_createStmtsStrings[INDEX_NR_GNB_NODEID] = "CREATE INDEX IF NOT EXISTS "
+                                                 "idx_nrgnb_nodeid ON nrgnb(nodeid);";
+
+    m_createStmtsStrings[INDEX_NR_GNB_CELLID] = "CREATE INDEX IF NOT EXISTS "
+                                                 "idx_nrgnb_cellid ON nrgnb(cellid);";
+
+    m_createStmtsStrings[INDEX_NR_UE_NODEID] = "CREATE INDEX IF NOT EXISTS "
+                                                "idx_nrue_nodeid ON nrue(nodeid);";
+
+    m_createStmtsStrings[INDEX_NR_UE_IMSI] = "CREATE INDEX IF NOT EXISTS "
+                                              "idx_nrue_imsi ON nrue(imsi);";
+
+    m_createStmtsStrings[INDEX_NR_UE_CELL_NODEID] = "CREATE INDEX IF NOT EXISTS "
+                                                     "idx_nruecell_nodeid ON nruecell(nodeid);";
+
+    m_createStmtsStrings[INDEX_NR_UE_CELL_CELLID] = "CREATE INDEX IF NOT EXISTS "
+                                                     "idx_nruecell_cellid ON nruecell(cellid);";
 
     m_createStmtsStrings[TABLE_NODE] =
         "CREATE TABLE IF NOT EXISTS node ("
@@ -1213,6 +1504,47 @@ OranDataRepositorySqlite::InitStatements()
         "INSERT INTO lteuersrprsrq "
         "(nodeid, simulationtime, rnti, cellid, rsrp, rsrq, serving, ccid) VALUES (?, ?, ?, ?, ?, "
         "?, ?, ?);";
+
+    // NR Query Statements
+    m_queryStmtsStrings[GET_NR_ALL_GNB_E2NODEIDS] =
+        "SELECT nr.nodeid, MAX(nr.simulationtime) "
+        "FROM noderegistration AS nr "
+        "INNER JOIN nrgnb ON nrgnb.nodeid = nr.nodeid "
+        "GROUP BY nr.nodeid "
+        "HAVING nr.registered = 1 "
+        "ORDER BY nr.nodeid;";
+
+    m_queryStmtsStrings[GET_NR_ALL_UE_E2NODEIDS] = "SELECT nr.nodeid, MAX(nr.simulationtime) "
+                                                    "FROM noderegistration AS nr "
+                                                    "INNER JOIN nrue ON nrue.nodeid = nr.nodeid "
+                                                    "GROUP BY nr.nodeid "
+                                                    "HAVING nr.registered = 1 "
+                                                    "ORDER BY nr.nodeid;";
+
+    m_queryStmtsStrings[GET_NR_CELLID_FROM_E2NODEID] = "SELECT cellid "
+                                                        "FROM nrgnb "
+                                                        "WHERE nodeid = ?;";
+
+    m_queryStmtsStrings[GET_NR_UE_CELLINFO] = "SELECT cellid, rnti "
+                                               "FROM nruecell "
+                                               "WHERE nodeid = ? "
+                                               "ORDER BY simulationtime DESC, entryid DESC "
+                                               "LIMIT 1;";
+
+    m_queryStmtsStrings[GET_NR_UE_E2NODEID_FROM_CELLINFO] = "SELECT nodeid "
+                                                             "FROM nruecell "
+                                                             "WHERE cellid = ? AND rnti = ? "
+                                                             "ORDER BY entryid DESC LIMIT 1;";
+
+    m_queryStmtsStrings[INSERT_NR_GNB_NODE] = "INSERT OR REPLACE INTO nrgnb "
+                                               "(nodeid, cellid) VALUES (?, ?);";
+
+    m_queryStmtsStrings[INSERT_NR_UE_NODE] = "INSERT OR REPLACE INTO nrue "
+                                              "(nodeid, imsi) VALUES (?, ?);";
+
+    m_queryStmtsStrings[INSERT_NR_UE_CELL] =
+        "INSERT INTO nruecell "
+        "(nodeid, cellid, rnti, simulationtime) VALUES (?, ?, ?, ?);";
 
     m_queryStmtsStrings[LOG_CMM_ACTION] =
         "INSERT INTO cmmaction "
