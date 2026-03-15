@@ -141,6 +141,8 @@ build_lib(
     model/oran-e2-node-terminator-wired.cc
     model/oran-e2-node-terminator-lte-enb.cc
     model/oran-e2-node-terminator-lte-ue.cc
+    model/oran-e2-node-terminator-nr-gnb.cc
+    model/oran-e2-node-terminator-nr-ue.cc
     model/oran-e2-node-terminator-container.cc
     model/oran-report-trigger.cc
     model/oran-report-trigger-periodic.cc
@@ -181,6 +183,8 @@ build_lib(
     model/oran-e2-node-terminator-wired.h
     model/oran-e2-node-terminator-lte-enb.h
     model/oran-e2-node-terminator-lte-ue.h
+    model/oran-e2-node-terminator-nr-gnb.h
+    model/oran-e2-node-terminator-nr-ue.h
     model/oran-e2-node-terminator-container.h
     model/oran-report-trigger.h
     model/oran-report-trigger-periodic.h
@@ -195,6 +199,7 @@ build_lib(
     ${libcore}
     ${libnetwork}
     ${liblte}
+    ${libnr}
     ${sqlite_libraries}
     ${torch_libraries}
     ${onnxruntime_libraries}
