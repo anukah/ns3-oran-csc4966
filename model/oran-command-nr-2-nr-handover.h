@@ -28,83 +28,66 @@
  * employees is not subject to copyright protection within the United States.
  */
 
-#include "oran-e2-node-terminator-nr-gnb.h"
+#ifndef ORAN_COMMAND_NR_2_NR_HANDOVER_H
+#define ORAN_COMMAND_NR_2_NR_HANDOVER_H
 
-#include "oran-command-nr-2-nr-handover.h"
-
-#include "ns3/abort.h"
-#include "ns3/log.h"
-#include "ns3/node.h"
-#include "ns3/nr-gnb-rrc.h"
-#include "ns3/pointer.h"
-#include "ns3/string.h"
+#include "oran-command.h"
 
 namespace ns3
 {
 
-NS_LOG_COMPONENT_DEFINE("OranE2NodeTerminatorNrGnb");
-
-NS_OBJECT_ENSURE_REGISTERED(OranE2NodeTerminatorNrGnb);
-
-TypeId
-OranE2NodeTerminatorNrGnb::GetTypeId()
+/**
+ * @ingroup oran
+ * A Command instructing an NR gNB to handover a UE to another NR gNB.
+ * In this command the Target E2 Node ID is the serving NR gNB, and the command
+ * contains the cell ID of the gNB to handover to, and the RNTI of the UE to be
+ * handed over.
+ */
+class OranCommandNr2NrHandover : public OranCommand
 {
-    static TypeId tid = TypeId("ns3::OranE2NodeTerminatorNrGnb")
-                            .SetParent<OranE2NodeTerminator>()
-                            .AddConstructor<OranE2NodeTerminatorNrGnb>();
+  public:
+    /**
+     * Gets the TypeId of the OranCommandNr2NrHandover class.
+     *
+     * @return The TypeId.
+     */
+    static TypeId GetTypeId();
+    /**
+     * Creates an instance of the OranCommandNr2NrHandover class.
+     */
+    OranCommandNr2NrHandover();
+    /**
+     * The destructor of the OranCommandNr2NrHandover class.
+     */
+    ~OranCommandNr2NrHandover() override;
 
-    return tid;
-}
+    std::string ToString() const override;
 
-OranE2NodeTerminatorNrGnb::OranE2NodeTerminatorNrGnb()
-    : OranE2NodeTerminator()
-{
-    NS_LOG_FUNCTION(this);
-}
+  private:
+    /**
+     * The ID of the cell to handover to.
+     */
+    uint16_t m_targetCellId;
+    /**
+     * The RNTI of the UE to handover.
+     */
+    uint16_t m_targetRnti;
 
-OranE2NodeTerminatorNrGnb::~OranE2NodeTerminatorNrGnb()
-{
-    NS_LOG_FUNCTION(this);
-}
-
-OranNearRtRic::NodeType
-OranE2NodeTerminatorNrGnb::GetNodeType() const
-{
-    NS_LOG_FUNCTION(this);
-
-    return OranNearRtRic::NodeType::NRGNB;
-}
-
-void
-OranE2NodeTerminatorNrGnb::ReceiveCommand(Ptr<OranCommand> command)
-{
-    NS_LOG_FUNCTION(this << command);
-
-    if (m_active)
-    {
-        if (command->GetInstanceTypeId() == OranCommandNr2NrHandover::GetTypeId())
-        {
-            Ptr<OranCommandNr2NrHandover> handoverCommand =
-                command->GetObject<OranCommandNr2NrHandover>();
-
-            Ptr<NrGnbRrc> nrGnbRrc = GetNetDevice()->GetRrc();
-            nrGnbRrc->SendHandoverRequest(handoverCommand->GetTargetRnti(),
-                                           handoverCommand->GetTargetCellId());
-        }
-    }
-}
-
-Ptr<NrGnbNetDevice>
-OranE2NodeTerminatorNrGnb::GetNetDevice() const
-{
-    NS_LOG_FUNCTION(this);
-
-    Ptr<NrGnbNetDevice> nrGnbNetDev =
-        GetNode()->GetDevice(GetNetDeviceIndex())->GetObject<NrGnbNetDevice>();
-
-    NS_ABORT_MSG_IF(nrGnbNetDev == nullptr, "Unable to find appropriate network device");
-
-    return nrGnbNetDev;
-}
+  public:
+    /**
+     * Gets the ID of the cell to handover to.
+     *
+     * @returns The cell ID.
+     */
+    uint16_t GetTargetCellId() const;
+    /**
+     * Gets the RNTI of the UE to handover.
+     *
+     * @returns The RNTI.
+     */
+    uint16_t GetTargetRnti() const;
+}; // class OranCommandNr2NrHandover
 
 } // namespace ns3
+
+#endif /* ORAN_COMMAND_NR_2_NR_HANDOVER_H */
