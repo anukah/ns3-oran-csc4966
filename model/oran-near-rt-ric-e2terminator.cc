@@ -42,6 +42,7 @@
 #include "oran-report-location.h"
 #include "oran-report-lte-ue-cell-info.h"
 #include "oran-report-lte-ue-rsrp-rsrq.h"
+#include "oran-report-nr-ue-cell-info.h"
 #include "oran-report.h"
 
 #include "ns3/abort.h"
@@ -224,6 +225,16 @@ OranNearRtRicE2Terminator::ReceiveReport(Ptr<OranReport> report)
                                       lteUeCellInfoRpt->GetCellId(),
                                       lteUeCellInfoRpt->GetRnti(),
                                       lteUeCellInfoRpt->GetTime());
+        }
+        else if (report->GetInstanceTypeId() ==
+                 TypeId::LookupByName("ns3::OranReportNrUeCellInfo"))
+        {
+            Ptr<OranReportNrUeCellInfo> nrUeCellInfoRpt =
+                report->GetObject<OranReportNrUeCellInfo>();
+            m_data->SaveNrUeCellInfo(nrUeCellInfoRpt->GetReporterE2NodeId(),
+                                      nrUeCellInfoRpt->GetCellId(),
+                                      nrUeCellInfoRpt->GetRnti(),
+                                      nrUeCellInfoRpt->GetTime());
         }
         else if (report->GetInstanceTypeId() == TypeId::LookupByName("ns3::OranReportAppLoss"))
         {
