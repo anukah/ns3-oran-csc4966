@@ -34,6 +34,8 @@
 #include "oran-data-repository.h"
 #include "oran-e2-node-terminator-lte-enb.h"
 #include "oran-e2-node-terminator-lte-ue.h"
+#include "oran-e2-node-terminator-nr-gnb.h"
+#include "oran-e2-node-terminator-nr-ue.h"
 #include "oran-e2-node-terminator.h"
 #include "oran-near-rt-ric.h"
 #include "oran-report-apploss.h"
@@ -150,6 +152,17 @@ OranNearRtRicE2Terminator::ReceiveRegistrationRequest(OranNearRtRic::NodeType ty
             e2NodeId = m_data->RegisterNodeLteEnb(
                 id,
                 terminator->GetObject<OranE2NodeTerminatorLteEnb>()->GetNetDevice()->GetCellId());
+            break;
+        case OranNearRtRic::NodeType::NRUE:
+            e2NodeId = m_data->RegisterNodeNrUe(id,
+                                                 terminator->GetObject<OranE2NodeTerminatorNrUe>()
+                                                     ->GetNetDevice()
+                                                     ->GetImsi());
+            break;
+        case OranNearRtRic::NodeType::NRGNB:
+            e2NodeId = m_data->RegisterNodeNrGnb(
+                id,
+                terminator->GetObject<OranE2NodeTerminatorNrGnb>()->GetNetDevice()->GetCellId());
             break;
         default:
             e2NodeId = m_data->RegisterNode(type, id);
