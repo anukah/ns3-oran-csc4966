@@ -150,6 +150,7 @@ build_lib(
     model/oran-report-trigger.cc
     model/oran-report-trigger-periodic.cc
     model/oran-report-trigger-lte-ue-handover.cc
+    model/oran-report-trigger-nr-ue-handover.cc
     model/oran-report-trigger-location-change.cc
     model/oran-query-trigger.cc
     model/oran-query-trigger-noop.cc
@@ -195,6 +196,7 @@ build_lib(
     model/oran-report-trigger.h
     model/oran-report-trigger-periodic.h
     model/oran-report-trigger-lte-ue-handover.h
+    model/oran-report-trigger-nr-ue-handover.h
     model/oran-report-trigger-location-change.h
     model/oran-query-trigger.h
     model/oran-query-trigger-custom.h
