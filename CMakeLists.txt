@@ -131,12 +131,14 @@ build_lib(
     model/oran-report-location.cc
     model/oran-report-lte-ue-cell-info.cc
     model/oran-report-nr-ue-cell-info.cc
+    model/oran-report-nr-ue-rsrp-rsrq.cc
     model/oran-reporter.cc
     model/oran-reporter-apploss.cc
     model/oran-reporter-lte-ue-rsrp-rsrq.cc
     model/oran-reporter-location.cc
     model/oran-reporter-lte-ue-cell-info.cc
     model/oran-reporter-nr-ue-cell-info.cc
+    model/oran-reporter-nr-ue-rsrp-rsrq.cc
     model/oran-data-repository.cc
     model/oran-data-repository-sqlite.cc
     model/oran-near-rt-ric-e2terminator.cc
@@ -177,12 +179,14 @@ build_lib(
     model/oran-report-location.h
     model/oran-report-lte-ue-cell-info.h
     model/oran-report-nr-ue-cell-info.h
+    model/oran-report-nr-ue-rsrp-rsrq.h
     model/oran-reporter.h
     model/oran-reporter-apploss.h
     model/oran-reporter-lte-ue-rsrp-rsrq.h
     model/oran-reporter-location.h
     model/oran-reporter-lte-ue-cell-info.h
     model/oran-reporter-nr-ue-cell-info.h
+    model/oran-reporter-nr-ue-rsrp-rsrq.h
     model/oran-data-repository.h
     model/oran-data-repository-sqlite.h
     model/oran-near-rt-ric-e2terminator.h
