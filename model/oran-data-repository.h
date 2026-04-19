@@ -233,6 +233,26 @@ class OranDataRepository : public Object
                                    double rsrq,
                                    bool isServingCell,
                                    uint8_t componentCarrierId) = 0;
+    /**
+     * Store the NR UE's RSRP and RSRQ.
+     *
+     * @param e2NodeId The E2 Node ID of the node.
+     * @param t The time at which this cell information was reported by the node.
+     * @param rnti The RNTI assigned to the UE by the cell.
+     * @param cellId The cell ID of the connected cell.
+     * @param rsrp The RSRP value.
+     * @param rsrq The RSRQ value.
+     * @param bool isServingCell A flag that indicates if this is the serving cell.
+     * @param componentCarrierId The component carrier ID.
+     */
+    virtual void SaveNrUeRsrpRsrq(uint64_t e2NodeId,
+                                  Time t,
+                                  uint16_t rnti,
+                                  uint16_t cellId,
+                                  double rsrp,
+                                  double rsrq,
+                                  bool isServingCell,
+                                  uint8_t componentCarrierId) = 0;
 
     /* Data Access API */
     /**
@@ -347,6 +367,15 @@ class OranDataRepository : public Object
      */
     virtual std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>>
     GetLteUeRsrpRsrq(uint64_t e2NodeId) = 0;
+    /**
+     * Gets the last reported NR RSRP and RSRQ values.
+     *
+     * @param e2NodeId The E2 Node ID.
+     * @return A collection of RNTI, cell ID, RSRP, RSRQ, is serving, and component carrier ID
+     * tuples.
+     */
+    virtual std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>>
+    GetNrUeRsrpRsrq(uint64_t e2NodeId) = 0;
 
     /* Logging API */
     /**
