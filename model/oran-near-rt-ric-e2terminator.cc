@@ -43,6 +43,7 @@
 #include "oran-report-lte-ue-cell-info.h"
 #include "oran-report-lte-ue-rsrp-rsrq.h"
 #include "oran-report-nr-ue-cell-info.h"
+#include "oran-report-nr-ue-rsrp-rsrq.h"
 #include "oran-report.h"
 
 #include "ns3/abort.h"
@@ -255,6 +256,19 @@ OranNearRtRicE2Terminator::ReceiveReport(Ptr<OranReport> report)
                                       rsrpRsrqRpt->GetRsrq(),
                                       rsrpRsrqRpt->GetIsServingCell(),
                                       rsrpRsrqRpt->GetComponentCarrierId());
+        }
+        else if (report->GetInstanceTypeId() ==
+                 TypeId::LookupByName("ns3::OranReportNrUeRsrpRsrq"))
+        {
+            Ptr<OranReportNrUeRsrpRsrq> rsrpRsrqRpt = report->GetObject<OranReportNrUeRsrpRsrq>();
+            m_data->SaveNrUeRsrpRsrq(rsrpRsrqRpt->GetReporterE2NodeId(),
+                                     rsrpRsrqRpt->GetTime(),
+                                     rsrpRsrqRpt->GetRnti(),
+                                     rsrpRsrqRpt->GetCellId(),
+                                     rsrpRsrqRpt->GetRsrp(),
+                                     rsrpRsrqRpt->GetRsrq(),
+                                     rsrpRsrqRpt->GetIsServingCell(),
+                                     rsrpRsrqRpt->GetComponentCarrierId());
         }
 
         m_nearRtRic->NotifyReportReceived(report);
