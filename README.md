@@ -1,5 +1,5 @@
 # ORAN ns-3 Module
-### This is a fork of ns-3-oran with potential NR integration
+### This is a fork of ns-3-oran with NR integration
 
 A module that can be used in [ns-3](https://www.nsnam.org/) to simulate and
 model behavior based on the [O-RAN](https://www.o-ran.org) specifications.
