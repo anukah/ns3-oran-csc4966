@@ -129,6 +129,7 @@ build_lib(
     model/oran-command-nr-2-nr-handover.cc
     model/oran-command-nr-2-lte-handover.cc
     model/oran-command-lte-2-nr-handover.cc
+    model/oran-lm-inter-rat-rsrp-handover.cc
     model/oran-report.cc
     model/oran-report-apploss.cc
     model/oran-report-lte-ue-rsrp-rsrq.cc
@@ -181,6 +182,7 @@ build_lib(
     model/oran-command-nr-2-nr-handover.h
     model/oran-command-nr-2-lte-handover.h
     model/oran-command-lte-2-nr-handover.h
+    model/oran-lm-inter-rat-rsrp-handover.h
     model/oran-report.h
     model/oran-report-apploss.h
     model/oran-report-lte-ue-rsrp-rsrq.h

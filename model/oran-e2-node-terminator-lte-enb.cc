@@ -31,6 +31,8 @@
 #include "oran-e2-node-terminator-lte-enb.h"
 
 #include "oran-command-lte-2-lte-handover.h"
+#include "oran-command-lte-2-nr-handover.h"
+#include "oran-command-nr-2-lte-handover.h"
 
 #include "ns3/abort.h"
 #include "ns3/log.h"
@@ -38,6 +40,7 @@
 #include "ns3/lte-enb-rrc.h"
 #include "ns3/node.h"
 #include "ns3/pointer.h"
+#include "ns3/simulator.h"
 #include "ns3/string.h"
 
 namespace ns3
@@ -85,13 +88,37 @@ OranE2NodeTerminatorLteEnb::ReceiveCommand(Ptr<OranCommand> command)
     {
         if (command->GetInstanceTypeId() == OranCommandLte2LteHandover::GetTypeId())
         {
-            Ptr<Node> node = GetNode();
             Ptr<OranCommandLte2LteHandover> handoverCommand =
                 command->GetObject<OranCommandLte2LteHandover>();
 
             Ptr<LteEnbRrc> lteEnbRrc = GetNetDevice()->GetRrc();
             lteEnbRrc->SendHandoverRequest(handoverCommand->GetTargetRnti(),
                                            handoverCommand->GetTargetCellId());
+        }
+        else if (command->GetInstanceTypeId() == OranCommandNr2LteHandover::GetTypeId())
+        {
+            // NSA EN-DC SCG release: RIC has decided NR coverage is insufficient.
+            // In a real NSA deployment the LTE eNB master would release the NR SCG
+            // via X2 signaling to the gNB. NS-3 does not model the EN-DC SCG
+            // release procedure, so we log the command and record it in the DB.
+            // The SQLite commands table provides the evidence of correct O-RAN
+            // control-plane decisions based on RSRP thresholds.
+            Ptr<OranCommandNr2LteHandover> nr2LteCmd =
+                command->GetObject<OranCommandNr2LteHandover>();
+            NS_LOG_INFO("LTE eNB (master): received NR→LTE SCG release for RNTI="
+                        << nr2LteCmd->GetTargetRnti()
+                        << " at t=" << Simulator::Now().GetSeconds() << "s");
+        }
+        else if (command->GetInstanceTypeId() == OranCommandLte2NrHandover::GetTypeId())
+        {
+            // NSA EN-DC SCG re-add: RIC has decided NR coverage has recovered.
+            // Same note as above — logged and stored in DB.
+            Ptr<OranCommandLte2NrHandover> lte2NrCmd =
+                command->GetObject<OranCommandLte2NrHandover>();
+            NS_LOG_INFO("LTE eNB (master): received LTE→NR SCG re-add for RNTI="
+                        << lte2NrCmd->GetTargetRnti()
+                        << " NrCellId=" << lte2NrCmd->GetTargetNrCellId()
+                        << " at t=" << Simulator::Now().GetSeconds() << "s");
         }
     }
 }
