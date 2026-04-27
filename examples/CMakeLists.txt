@@ -120,3 +120,29 @@ build_lib_example(
     ${libmobility}
 )
 
+build_lib_example(
+  NAME oran-nr-2-nr-distance-handover-example
+  SOURCE_FILES oran-nr-2-nr-distance-handover-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+)
+
+build_lib_example(
+  NAME oran-nr-2-nr-rsrp-handover-lm-example
+  SOURCE_FILES oran-nr-2-nr-rsrp-handover-lm-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+)
+
