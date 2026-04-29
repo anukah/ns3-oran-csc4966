@@ -117,10 +117,6 @@ OranLmInterRatRsrpHandover::Run()
     }
     uint64_t lteEnbE2NodeId = lteEnbIds.front();
 
-    // Get LTE UE registrations to retrieve LTE RNTI (used in command payload).
-    // Assumes 1:1 correspondence with NR UEs (single UE scenario).
-    std::vector<uint64_t> lteUeIds = data->GetLteUeE2NodeIds();
-
     for (uint64_t nrUeId : data->GetNrUeE2NodeIds())
     {
         // Get the NR UE's current cell info (cell ID + RNTI on NR side).
@@ -171,18 +167,34 @@ OranLmInterRatRsrpHandover::Run()
             m_ueOnNr[nrUeId] = true;
         }
 
-        // Retrieve LTE RNTI. Use the first registered LTE UE (single-UE scenario).
-        uint16_t lteRnti = 1;
-        if (!lteUeIds.empty())
+        // Pair this NR UE with its corresponding LTE UE by IMSI (the same way
+        // real NSA EN-DC networks identify UEs across RATs). The LTE RNTI of
+        // the matched UE is what the eNB master needs in the command payload.
+        uint64_t imsi = data->GetNrUeImsi(nrUeId);
+        if (imsi == 0)
         {
-            bool lteInfoFound;
-            uint16_t lteCellId;
-            std::tie(lteInfoFound, lteCellId, lteRnti) = data->GetLteUeCellInfo(lteUeIds.front());
-            if (!lteInfoFound)
-            {
-                NS_LOG_INFO("No LTE cell info yet — using default RNTI=1");
-                lteRnti = 1;
-            }
+            NS_LOG_INFO("No IMSI yet for NR UE E2 node " << nrUeId
+                                                          << " — skipping this tick");
+            continue;
+        }
+
+        uint64_t lteUeId = data->GetLteUeE2NodeIdFromImsi(imsi);
+        if (lteUeId == 0)
+        {
+            NS_LOG_INFO("No LTE UE registered with IMSI " << imsi
+                                                            << " — skipping this tick");
+            continue;
+        }
+
+        bool lteInfoFound;
+        uint16_t lteCellId;
+        uint16_t lteRnti;
+        std::tie(lteInfoFound, lteCellId, lteRnti) = data->GetLteUeCellInfo(lteUeId);
+        if (!lteInfoFound)
+        {
+            NS_LOG_INFO("No LTE cell info for paired LTE UE E2 node "
+                        << lteUeId << " (IMSI " << imsi << ") — skipping this tick");
+            continue;
         }
 
         if (m_ueOnNr[nrUeId])

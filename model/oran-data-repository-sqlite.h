@@ -120,11 +120,15 @@ class OranDataRepositorySqlite : public OranDataRepository
     std::tuple<bool, uint16_t, uint16_t> GetLteUeCellInfo(uint64_t e2NodeId) override;
     std::vector<uint64_t> GetLteUeE2NodeIds() override;
     uint64_t GetLteUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) override;
+    uint64_t GetLteUeImsi(uint64_t e2NodeId) override;
+    uint64_t GetLteUeE2NodeIdFromImsi(uint64_t imsi) override;
     std::tuple<bool, uint16_t> GetLteEnbCellInfo(uint64_t e2NodeId) override;
     std::vector<uint64_t> GetLteEnbE2NodeIds() override;
     std::tuple<bool, uint16_t, uint16_t> GetNrUeCellInfo(uint64_t e2NodeId) override;
     std::vector<uint64_t> GetNrUeE2NodeIds() override;
     uint64_t GetNrUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) override;
+    uint64_t GetNrUeImsi(uint64_t e2NodeId) override;
+    uint64_t GetNrUeE2NodeIdFromImsi(uint64_t imsi) override;
     std::tuple<bool, uint16_t> GetNrGnbCellInfo(uint64_t e2NodeId) override;
     std::vector<uint64_t> GetNrGnbE2NodeIds() override;
     std::vector<std::tuple<uint64_t, Time>> GetLastRegistrationRequests() override;
@@ -163,6 +167,8 @@ class OranDataRepositorySqlite : public OranDataRepository
         GET_LTE_CELLID_FROM_E2NODEID,      //!< Get the cell ID of an LTE eNB from its E2 Node ID
         GET_LTE_UE_CELLINFO,               //!< Get the cell information associated with LTE UE
         GET_LTE_UE_E2NODEID_FROM_CELLINFO, //!< Get the E2 ID of a UE from the cell information
+        GET_LTE_UE_IMSI,                   //!< Get the IMSI of an LTE UE from its E2 ID
+        GET_LTE_UE_E2NODEID_FROM_IMSI,     //!< Get the E2 ID of an LTE UE from its IMSI
         GET_LTE_UE_RSRP_RSRQ,              //!< Get the UE RSRP and RSRQ measurements
         GET_NODE_ALL_POSITIONS,            //!< The location of all nodes E2 nodes
         INSERT_LTE_ENB_NODE,               //!< Add an LTE eNB E2 node
@@ -178,6 +184,8 @@ class OranDataRepositorySqlite : public OranDataRepository
         GET_NR_CELLID_FROM_E2NODEID,       //!< Get the cell ID of an NR gNB from its E2 Node ID
         GET_NR_UE_CELLINFO,                //!< Get the cell information associated with NR UE
         GET_NR_UE_E2NODEID_FROM_CELLINFO,  //!< Get the E2 ID of a UE from the NR cell information
+        GET_NR_UE_IMSI,                    //!< Get the IMSI of an NR UE from its E2 ID
+        GET_NR_UE_E2NODEID_FROM_IMSI,      //!< Get the E2 ID of an NR UE from its IMSI
         INSERT_NR_GNB_NODE,                //!< Add an NR gNB E2 node
         INSERT_NR_UE_NODE,                 //!< Add an NR UE E2 node
         INSERT_NR_UE_CELL,                 //!< Add NR UE cell information for an E2 node

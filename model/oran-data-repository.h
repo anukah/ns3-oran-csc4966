@@ -293,6 +293,20 @@ class OranDataRepository : public Object
      */
     virtual uint64_t GetLteUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) = 0;
     /**
+     * Get the IMSI of an LTE UE given its E2 Node ID.
+     *
+     * @param e2NodeId The E2 Node ID of the LTE UE.
+     * @return The IMSI, or 0 if the LTE UE is not registered.
+     */
+    virtual uint64_t GetLteUeImsi(uint64_t e2NodeId) = 0;
+    /**
+     * Get the E2 Node ID of the LTE UE that has a given IMSI.
+     *
+     * @param imsi The IMSI.
+     * @return The E2 Node ID of the LTE UE, or 0 if no LTE UE has that IMSI.
+     */
+    virtual uint64_t GetLteUeE2NodeIdFromImsi(uint64_t imsi) = 0;
+    /**
      * Gets the the cell information for an eNB.
      *
      * @param e2NodeId The E2 Node ID.
@@ -330,6 +344,20 @@ class OranDataRepository : public Object
      * @return The E2 Node ID of the NR UE.
      */
     virtual uint64_t GetNrUeE2NodeIdFromCellInfo(uint16_t cellId, uint16_t rnti) = 0;
+    /**
+     * Get the IMSI of an NR UE given its E2 Node ID.
+     *
+     * @param e2NodeId The E2 Node ID of the NR UE.
+     * @return The IMSI, or 0 if the NR UE is not registered.
+     */
+    virtual uint64_t GetNrUeImsi(uint64_t e2NodeId) = 0;
+    /**
+     * Get the E2 Node ID of the NR UE that has a given IMSI.
+     *
+     * @param imsi The IMSI.
+     * @return The E2 Node ID of the NR UE, or 0 if no NR UE has that IMSI.
+     */
+    virtual uint64_t GetNrUeE2NodeIdFromImsi(uint64_t imsi) = 0;
     /**
      * Gets the cell information for an NR gNB.
      *
