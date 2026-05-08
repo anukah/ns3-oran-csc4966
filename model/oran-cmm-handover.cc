@@ -99,6 +99,8 @@ OranCmmHandover::Filter(
         {
             Ptr<OranCommandLte2LteHandover> handoverCmd =
                 cmd->GetObject<OranCommandLte2LteHandover>();
+            Ptr<OranCommandNr2NrHandover> nrHandoverCmd =
+                cmd->GetObject<OranCommandNr2NrHandover>();
             if (handoverCmd != nullptr)
             {
                 bool found = false;
@@ -115,6 +117,28 @@ OranCmmHandover::Filter(
                 {
                     commands.push_back(handoverCmd);
                     m_pendingCmds.push_back(handoverCmd);
+                }
+                else
+                {
+                    LogLogicToStorage("Excluding a pending command: " + cmd->ToString());
+                }
+            }
+            else if (nrHandoverCmd != nullptr)
+            {
+                bool found = false;
+                for (auto pendingCmd : m_pendingNrCmds)
+                {
+                    if (pendingCmd->GetTargetE2NodeId() == nrHandoverCmd->GetTargetE2NodeId() &&
+                        pendingCmd->GetTargetCellId() == nrHandoverCmd->GetTargetCellId() &&
+                        pendingCmd->GetTargetRnti() == nrHandoverCmd->GetTargetRnti())
+                    {
+                        found = true;
+                    }
+                }
+                if (!found)
+                {
+                    commands.push_back(nrHandoverCmd);
+                    m_pendingNrCmds.push_back(nrHandoverCmd);
                 }
                 else
                 {

@@ -33,6 +33,7 @@
 
 #include "oran-cmm.h"
 #include "oran-command-lte-2-lte-handover.h"
+#include "oran-command-nr-2-nr-handover.h"
 
 namespace ns3
 {
@@ -84,6 +85,10 @@ class OranCmmHandover : public OranCmm
      * Keep track of pending handover commands.
      */
     std::vector<Ptr<OranCommandLte2LteHandover>> m_pendingCmds;
+    /**
+     * Keep track of pending NR handover commands.
+     */
+    std::vector<Ptr<OranCommandNr2NrHandover>> m_pendingNrCmds;
 
 }; // class OranCmmHandover
 
