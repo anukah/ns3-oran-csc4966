@@ -253,6 +253,22 @@ class OranDataRepository : public Object
                                   double rsrq,
                                   bool isServingCell,
                                   uint8_t componentCarrierId) = 0;
+    /**
+     * Store the NR UE's DL CTRL SINR.
+     *
+     * @param e2NodeId The E2 Node ID of the node.
+     * @param t The time at which this measurement was reported.
+     * @param cellId The cell ID of the serving cell.
+     * @param rnti The RNTI assigned to the UE.
+     * @param sinr The DL CTRL SINR (linear scale).
+     * @param bwpId The bandwidth part ID.
+     */
+    virtual void SaveNrUeSinr(uint64_t e2NodeId,
+                              Time t,
+                              uint16_t cellId,
+                              uint16_t rnti,
+                              double sinr,
+                              uint16_t bwpId) = 0;
 
     /* Data Access API */
     /**
@@ -404,6 +420,14 @@ class OranDataRepository : public Object
      */
     virtual std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>>
     GetNrUeRsrpRsrq(uint64_t e2NodeId) = 0;
+    /**
+     * Gets the last reported NR UE DL CTRL SINR values.
+     *
+     * @param e2NodeId The E2 Node ID.
+     * @return A collection of (cellId, rnti, sinr, bwpId) tuples for the most recent timestamp.
+     */
+    virtual std::vector<std::tuple<uint16_t, uint16_t, double, uint16_t>>
+    GetNrUeSinr(uint64_t e2NodeId) = 0;
 
     /* Logging API */
     /**
