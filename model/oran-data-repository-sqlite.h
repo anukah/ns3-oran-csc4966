@@ -112,6 +112,12 @@ class OranDataRepositorySqlite : public OranDataRepository
                           double rsrq,
                           bool isServingCell,
                           uint8_t componentCarrierId) override;
+    void SaveNrUeSinr(uint64_t e2NodeId,
+                      Time t,
+                      uint16_t cellId,
+                      uint16_t rnti,
+                      double sinr,
+                      uint16_t bwpId) override;
 
     std::map<Time, Vector> GetNodePositions(uint64_t e2NodeId,
                                             Time fromTime,
@@ -136,6 +142,8 @@ class OranDataRepositorySqlite : public OranDataRepository
     std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>> GetLteUeRsrpRsrq(
         uint64_t e2NodeId) override;
     std::vector<std::tuple<uint16_t, uint16_t, double, double, bool, uint8_t>> GetNrUeRsrpRsrq(
+        uint64_t e2NodeId) override;
+    std::vector<std::tuple<uint16_t, uint16_t, double, uint16_t>> GetNrUeSinr(
         uint64_t e2NodeId) override;
 
     void LogCommandE2Terminator(Ptr<OranCommand> cmd) override;
@@ -191,6 +199,8 @@ class OranDataRepositorySqlite : public OranDataRepository
         INSERT_NR_UE_CELL,                 //!< Add NR UE cell information for an E2 node
         GET_NR_UE_RSRP_RSRQ,               //!< Get the NR UE RSRP and RSRQ measurements
         INSERT_NR_UE_RSRP_RSRQ,            //!< Add NR UE RSRP and RSRQ
+        GET_NR_UE_SINR,                     //!< Get the NR UE SINR measurements
+        INSERT_NR_UE_SINR,                  //!< Add NR UE SINR measurement
         LOG_CMM_ACTION,                    //!< Log a CM module action
         LOG_E2TERMINATOR_COMMAND,          //!< Log an E2 terminator command from the RIC
         LOG_LM_ACTION,                     //!< Log an LM action
@@ -231,6 +241,7 @@ class OranDataRepositorySqlite : public OranDataRepository
         INDEX_NR_UE_CELL_NODEID,  //!< Index for NR UE Cell Information based on E2 Node IDs
         INDEX_NR_UE_CELL_CELLID,  //!< Index for NR UE Cell Information based on Cell IDs
         TABLE_NR_UE_RSRP_RSRQ,    //!< Table with NR UE RSRP and RSRQ Information
+        TABLE_NR_UE_SINR,         //!< Table with NR UE SINR Information
         TABLE_NODE,               //!< Table with E2 Node Information
         TABLE_NODE_LOCATION,      //!< Table with Node Locations
         TABLE_NODE_REGISTRATION,  //!< Table with Node Registrations
