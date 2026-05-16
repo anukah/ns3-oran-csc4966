@@ -79,7 +79,7 @@ class OranReportNrUeSinr : public OranReport
      */
     uint16_t GetRnti() const;
     /**
-     * Gets the reported DL CTRL SINR (linear scale).
+     * Gets the reported DL CTRL SINR (dB).
      *
      * @return The reported SINR.
      */
@@ -101,7 +101,7 @@ class OranReportNrUeSinr : public OranReport
      */
     uint16_t m_rnti;
     /**
-     * The DL CTRL SINR (linear scale).
+     * The DL CTRL SINR (dB).
      */
     double m_sinr;
     /**

@@ -61,7 +61,7 @@ OranReportNrUeSinr::GetTypeId()
                           MakeUintegerAccessor(&OranReportNrUeSinr::m_rnti),
                           MakeUintegerChecker<uint16_t>())
             .AddAttribute("Sinr",
-                          "The DL CTRL SINR (linear).",
+                          "The DL CTRL SINR (dB).",
                           DoubleValue(),
                           MakeDoubleAccessor(&OranReportNrUeSinr::m_sinr),
                           MakeDoubleChecker<double>())

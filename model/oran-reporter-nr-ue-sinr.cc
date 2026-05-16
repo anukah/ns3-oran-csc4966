@@ -38,6 +38,8 @@
 #include "ns3/simulator.h"
 #include "ns3/uinteger.h"
 
+#include <cmath>
+
 namespace ns3
 {
 
@@ -82,7 +84,7 @@ OranReporterNrUeSinr::ReportSinr(uint16_t cellId,
         report->SetAttribute("Time", TimeValue(Simulator::Now()));
         report->SetAttribute("CellId", UintegerValue(cellId));
         report->SetAttribute("Rnti", UintegerValue(rnti));
-        report->SetAttribute("Sinr", DoubleValue(sinr));
+        report->SetAttribute("Sinr", DoubleValue(10.0 * std::log10(sinr)));
         report->SetAttribute("BwpId", UintegerValue(bwpId));
 
         m_reports.push_back(report);
