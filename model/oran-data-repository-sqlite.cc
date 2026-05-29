@@ -1532,6 +1532,7 @@ OranDataRepositorySqlite::InitDb()
     RunCreateStatement(m_createStmtsStrings[TABLE_NR_UE_SINR]);
     RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_CELL_NODEID]);
     RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_CELL_CELLID]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_SINR_NODEID]);
 
     RunCreateStatement(m_createStmtsStrings[TABLE_APPLOSS_COMMAND]);
 
@@ -1699,6 +1700,10 @@ OranDataRepositorySqlite::InitStatements()
 
     m_createStmtsStrings[INDEX_NR_UE_CELL_CELLID] = "CREATE INDEX IF NOT EXISTS "
                                                      "idx_nruecell_cellid ON nruecell(cellid);";
+
+    m_createStmtsStrings[INDEX_NR_UE_SINR_NODEID] =
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_nruesinr_nodeid ON nruesinr(nodeid, simulationtime);";
 
     m_createStmtsStrings[TABLE_NODE] =
         "CREATE TABLE IF NOT EXISTS node ("

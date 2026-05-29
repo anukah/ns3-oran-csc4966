@@ -242,6 +242,7 @@ class OranDataRepositorySqlite : public OranDataRepository
         INDEX_NR_UE_CELL_CELLID,  //!< Index for NR UE Cell Information based on Cell IDs
         TABLE_NR_UE_RSRP_RSRQ,    //!< Table with NR UE RSRP and RSRQ Information
         TABLE_NR_UE_SINR,         //!< Table with NR UE SINR Information
+        INDEX_NR_UE_SINR_NODEID,  //!< Index for NR UE SINR based on E2 Node ID and time
         TABLE_NODE,               //!< Table with E2 Node Information
         TABLE_NODE_LOCATION,      //!< Table with Node Locations
         TABLE_NODE_REGISTRATION,  //!< Table with Node Registrations
