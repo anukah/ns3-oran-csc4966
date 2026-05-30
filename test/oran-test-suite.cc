@@ -30,8 +30,14 @@
 
 // An essential include is test.h
 #include "ns3/core-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/isotropic-antenna-model.h"
 #include "ns3/mobility-module.h"
+#include "ns3/nr-channel-helper.h"
+#include "ns3/nr-helper.h"
+#include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/oran-module.h"
+#include "ns3/point-to-point-module.h"
 #include "ns3/test.h"
 
 #include <cmath>
@@ -511,6 +517,188 @@ class OranTestCaseNrReportDispatch : public TestCase
 };
 
 /**
+ * Integration test: set up a minimal NR simulation with two gNBs, attach a UE
+ * to the farther gNB, and verify that the RIC's distance-based Logic Module
+ * triggers a handover to the closer gNB.
+ */
+class OranTestCaseNrDistanceHandover : public TestCase
+{
+  public:
+    OranTestCaseNrDistanceHandover()
+        : TestCase("Oran Test Case NR Distance Handover Integration")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFileName = "oran-test-nr-distance-ho.db";
+        std::remove(dbFileName.c_str());
+
+        Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(30));
+        Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(23));
+        Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
+
+        Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+        Ptr<NrPointToPointEpcHelper> epcHelper = CreateObject<NrPointToPointEpcHelper>();
+        nrHelper->SetEpcHelper(epcHelper);
+        nrHelper->SetAttribute("UseIdealRrc", BooleanValue(true));
+        nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
+
+        NodeContainer gnbNodes;
+        gnbNodes.Create(2);
+        NodeContainer ueNodes;
+        ueNodes.Create(1);
+
+        Ptr<ListPositionAllocator> gnbPos = CreateObject<ListPositionAllocator>();
+        gnbPos->Add(Vector(0, 0, 25));
+        gnbPos->Add(Vector(200, 0, 25));
+
+        MobilityHelper gnbMob;
+        gnbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        gnbMob.SetPositionAllocator(gnbPos);
+        gnbMob.Install(gnbNodes);
+
+        Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+        uePos->Add(Vector(170, 0, 1.5));
+
+        MobilityHelper ueMob;
+        ueMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        ueMob.SetPositionAllocator(uePos);
+        ueMob.Install(ueNodes);
+
+        nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+        nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+        Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+        channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+        CcBwpCreator ccBwpCreator;
+        CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 10e6, static_cast<uint8_t>(1));
+        OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+        channelHelper->AssignChannelsToBands({band});
+        BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
+
+        NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
+        NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
+
+        // Minimal EPC / internet stack (required for NR attach)
+        NodeContainer remoteHostContainer;
+        remoteHostContainer.Create(1);
+        InternetStackHelper internet;
+        internet.Install(remoteHostContainer);
+
+        PointToPointHelper p2ph;
+        p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
+        p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
+        p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
+        NetDeviceContainer internetDevices = p2ph.Install(epcHelper->GetPgwNode(),
+                                                          remoteHostContainer.Get(0));
+        Ipv4AddressHelper ipv4h;
+        ipv4h.SetBase("1.0.0.0", "255.0.0.0");
+        ipv4h.Assign(internetDevices);
+
+        internet.Install(ueNodes);
+        epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevs));
+
+        nrHelper->AddX2Interface(gnbNodes);
+        // Attach UE to gNB1 (the farther one) — RIC should hand it over to gNB2
+        nrHelper->AttachToGnb(ueDevs.Get(0), gnbDevs.Get(0));
+
+        // O-RAN setup
+        Ptr<OranNearRtRic> nearRtRic = nullptr;
+        OranE2NodeTerminatorContainer e2TermGnbs;
+        OranE2NodeTerminatorContainer e2TermUes;
+        Ptr<OranHelper> oranHelper = CreateObject<OranHelper>();
+
+        oranHelper->SetAttribute("Verbose", BooleanValue(false));
+        oranHelper->SetAttribute("LmQueryInterval", TimeValue(Seconds(1)));
+        oranHelper->SetAttribute("E2NodeInactivityThreshold", TimeValue(Seconds(2)));
+        oranHelper->SetAttribute("E2NodeInactivityIntervalRv",
+                                 StringValue("ns3::ConstantRandomVariable[Constant=2]"));
+        oranHelper->SetAttribute("LmQueryMaxWaitTime", TimeValue(Seconds(0)));
+        oranHelper->SetAttribute("LmQueryLateCommandPolicy", EnumValue(OranNearRtRic::DROP));
+        oranHelper->SetAttribute("RicTransmissionDelayRv",
+                                 StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+
+        oranHelper->SetDataRepository("ns3::OranDataRepositorySqlite",
+                                      "DatabaseFile",
+                                      StringValue(dbFileName));
+        oranHelper->SetDefaultLogicModule(
+            "ns3::OranLmNr2NrDistanceHandover",
+            "ProcessingDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+        oranHelper->SetConflictMitigationModule("ns3::OranCmmNoop");
+
+        nearRtRic = oranHelper->CreateNearRtRic();
+
+        // UE terminators
+        oranHelper->SetE2NodeTerminator(
+            "ns3::OranE2NodeTerminatorNrUe",
+            "RegistrationIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "SendIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "TransmissionDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+        oranHelper->AddReporter("ns3::OranReporterLocation",
+                                "Trigger",
+                                StringValue("ns3::OranReportTriggerPeriodic"));
+        oranHelper->AddReporter(
+            "ns3::OranReporterNrUeCellInfo",
+            "Trigger",
+            StringValue("ns3::OranReportTriggerNrUeHandover[InitialReport=true]"));
+        e2TermUes.Add(oranHelper->DeployTerminators(nearRtRic, ueNodes));
+
+        // gNB terminators
+        oranHelper->SetE2NodeTerminator(
+            "ns3::OranE2NodeTerminatorNrGnb",
+            "RegistrationIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "SendIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "TransmissionDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+        oranHelper->AddReporter("ns3::OranReporterLocation",
+                                "Trigger",
+                                StringValue("ns3::OranReportTriggerPeriodic"));
+        e2TermGnbs.Add(oranHelper->DeployTerminators(nearRtRic, gnbNodes));
+
+        Simulator::Schedule(Seconds(1),
+                            &OranHelper::ActivateAndStartNearRtRic,
+                            oranHelper,
+                            nearRtRic);
+        Simulator::Schedule(Seconds(1.5),
+                            &OranHelper::ActivateE2NodeTerminators,
+                            oranHelper,
+                            e2TermGnbs);
+        Simulator::Schedule(Seconds(2),
+                            &OranHelper::ActivateE2NodeTerminators,
+                            oranHelper,
+                            e2TermUes);
+
+        Simulator::Stop(Seconds(8));
+        Simulator::Run();
+
+        // Verify: UE should have handed over to gNB2 (the closer gNB)
+        // The UE's E2 node ID depends on registration order; find it
+        std::vector<uint64_t> ueIds = nearRtRic->Data()->GetNrUeE2NodeIds();
+        NS_TEST_ASSERT_MSG_EQ(ueIds.empty(), false, "No NR UE registered in repository");
+
+        uint64_t ueE2NodeId = ueIds.front();
+        auto [found, cellId, rnti] = nearRtRic->Data()->GetNrUeCellInfo(ueE2NodeId);
+        NS_TEST_ASSERT_MSG_EQ(found, true, "UE cell info not found in repository");
+
+        // gNB2 has cellId 2 (assigned sequentially by NR helper)
+        // The UE started attached to gNB1 (cellId 1) but is at x=170, much
+        // closer to gNB2 at x=200 — the distance LM should have triggered HO
+        NS_TEST_ASSERT_MSG_EQ(cellId, 2, "UE did not hand over to the closer gNB (cellId 2)");
+
+        Simulator::Destroy();
+    }
+};
+
+/**
  * @ingroup oran
  *
  * Test suite for the O-RAN module
@@ -535,6 +723,7 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrUeCellInfo, Duration::QUICK);
     AddTestCase(new OranTestCaseNrUeRsrpRsrq, Duration::QUICK);
     AddTestCase(new OranTestCaseNrReportDispatch, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
 }
 
 static OranTestSuite soranTestSuite;
