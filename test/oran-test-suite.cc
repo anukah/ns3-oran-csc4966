@@ -667,6 +667,105 @@ class OranTestCaseNrRsrpSinrLmDecision : public TestCase
 };
 
 /**
+ * Verify that OranLmNr2NrRsrpHandover returns no command when the UE's serving
+ * cellId does not match any registered gNB — exercising the oldCellNodeId ==
+ * UINT64_MAX guard added to prevent use of an uninitialized variable.
+ */
+class OranTestCaseNrRsrpLmMissingGnb : public TestCase
+{
+  public:
+    OranTestCaseNrRsrpLmMissingGnb()
+        : TestCase("Oran Test Case NR RSRP LM Missing Serving gNB")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFile = "oran-test-rsrp-lm-missing-gnb.db";
+        Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+        Ptr<OranLmNr2NrRsrpHandover> lm = CreateObject<OranLmNr2NrRsrpHandover>();
+        lm->SetAttribute("NearRtRic", PointerValue(ric));
+        lm->SetAttribute("Verbose", BooleanValue(true));
+
+        Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+            // Register gNBs with cellId 10 and 20
+            ric->Data()->RegisterNodeNrGnb(1, 10);
+            ric->Data()->RegisterNodeNrGnb(2, 20);
+            ric->Data()->RegisterNodeNrUe(3, 100);
+            ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+            // UE reports serving cellId=99 — no gNB has this cellId
+            ric->Data()->SaveNrUeCellInfo(3, 99, 5, Seconds(0.1));
+            // RSRP data: neighbor (cellId 20) is much stronger than serving
+            ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 99, -95.0, -12.0, true, 0);
+            ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -70.0, -8.0, false, 0);
+
+            lm->Activate();
+            auto cmds = lm->Run();
+            NS_TEST_ASSERT_MSG_EQ(
+                cmds.size(),
+                0,
+                "No HO command when serving cellId has no matching gNB");
+        });
+
+        Simulator::Stop(Seconds(0.2));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * Verify that OranLmNr2NrDistanceHandover returns no command when the UE's
+ * serving cellId does not match any registered gNB — exercising the
+ * oldCellNodeId == UINT64_MAX guard.
+ */
+class OranTestCaseNrDistanceLmMissingGnb : public TestCase
+{
+  public:
+    OranTestCaseNrDistanceLmMissingGnb()
+        : TestCase("Oran Test Case NR Distance LM Missing Serving gNB")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFile = "oran-test-distance-lm-missing-gnb.db";
+        Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+        Ptr<OranLmNr2NrDistanceHandover> lm = CreateObject<OranLmNr2NrDistanceHandover>();
+        lm->SetAttribute("NearRtRic", PointerValue(ric));
+        lm->SetAttribute("Verbose", BooleanValue(true));
+
+        Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+            // gNBs with cellId 10 and 20
+            ric->Data()->RegisterNodeNrGnb(1, 10);
+            ric->Data()->RegisterNodeNrGnb(2, 20);
+            ric->Data()->RegisterNodeNrUe(3, 100);
+            ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+            // UE is near gNB2 but reports serving cellId=99 (no matching gNB)
+            ric->Data()->SavePosition(3, Vector(190, 0, 1.5), Seconds(0.1));
+            ric->Data()->SaveNrUeCellInfo(3, 99, 5, Seconds(0.1));
+
+            lm->Activate();
+            auto cmds = lm->Run();
+            NS_TEST_ASSERT_MSG_EQ(
+                cmds.size(),
+                0,
+                "No HO command when serving cellId has no matching gNB");
+        });
+
+        Simulator::Stop(Seconds(0.2));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/**
  * Integration test: set up a minimal NR simulation with two gNBs, attach a UE
  * to the farther gNB, and verify that the RIC's distance-based Logic Module
  * triggers a handover to the closer gNB.
@@ -874,6 +973,8 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrUeRsrpRsrq, Duration::QUICK);
     AddTestCase(new OranTestCaseNrReportDispatch, Duration::QUICK);
     AddTestCase(new OranTestCaseNrRsrpSinrLmDecision, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrRsrpLmMissingGnb, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrDistanceLmMissingGnb, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
 }
 
