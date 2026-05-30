@@ -174,7 +174,7 @@ OranLmNr2NrDistanceHandover::GetHandoverCommands(
     for (auto ueInfo : ueInfos)
     {
         double min = DBL_MAX;
-        uint64_t oldCellNodeId;
+        uint64_t oldCellNodeId = UINT64_MAX;
         uint16_t newCellId = ueInfo.cellId;
         for (const auto& gnbInfo : gnbInfos)
         {
@@ -200,6 +200,13 @@ OranLmNr2NrDistanceHandover::GetHandoverCommands(
             {
                 oldCellNodeId = gnbInfo.nodeId;
             }
+        }
+
+        if (oldCellNodeId == UINT64_MAX)
+        {
+            LogLogicToRepository("Could not find serving gNB E2 Node ID for CellID=" +
+                                 std::to_string(ueInfo.cellId) + ", skipping");
+            continue;
         }
 
         if (newCellId != ueInfo.cellId)
