@@ -30,8 +30,14 @@
 
 // An essential include is test.h
 #include "ns3/core-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/isotropic-antenna-model.h"
 #include "ns3/mobility-module.h"
+#include "ns3/nr-channel-helper.h"
+#include "ns3/nr-helper.h"
+#include "ns3/nr-point-to-point-epc-helper.h"
 #include "ns3/oran-module.h"
+#include "ns3/point-to-point-module.h"
 #include "ns3/test.h"
 
 #include <cmath>
@@ -511,6 +517,437 @@ class OranTestCaseNrReportDispatch : public TestCase
 };
 
 /**
+ * Unit test for OranLmNr2NrRsrpSinrHandover decision logic.
+ * Seeds the data repository directly and calls Run() to verify the
+ * two-stage gate: (1) SINR threshold, (2) RSRP with hysteresis.
+ */
+class OranTestCaseNrRsrpSinrLmDecision : public TestCase
+{
+  public:
+    OranTestCaseNrRsrpSinrLmDecision()
+        : TestCase("Oran Test Case NR RSRP+SINR LM Decision Logic")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Topology: gNB1 (nodeId=1, cellId=10), gNB2 (nodeId=2, cellId=20)
+        //           UE (nodeId=3, imsi=100) attached to gNB1 (cellId=10, rnti=5)
+        // LM config: SinrThresholdDb=5.0, HysteresisDb=3.0
+
+        // --- Sub-case 1: SINR above threshold → no handover ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-1.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 10 dB → above 5 dB threshold → no handover
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 10.0, 0);
+                // Neighbor has much better RSRP, but SINR gate blocks
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -85.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -70.0, -8.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 1: SINR above threshold should produce no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 2: SINR below threshold, neighbor doesn't beat hysteresis → no HO ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-2.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(100, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 2 dB → below threshold, proceed to RSRP check
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 2.0, 0);
+                // Serving RSRP = -82, neighbor RSRP = -83
+                // -83 <= -82 + 3 = -79, so hysteresis not exceeded → no HO
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -82.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -83.0, -9.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(
+                    cmds.size(),
+                    0,
+                    "Sub-case 2: neighbor RSRP doesn't beat hysteresis, no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 3: SINR below threshold AND neighbor beats hysteresis → handover ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-3.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 2 dB → below threshold
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 2.0, 0);
+                // Serving RSRP = -85, neighbor RSRP = -75
+                // -75 > -85 + 3 = -82 → hysteresis exceeded → handover!
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -85.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -75.0, -8.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      1,
+                                      "Sub-case 3: should produce exactly 1 HO command");
+
+                Ptr<OranCommandNr2NrHandover> hoCmd =
+                    DynamicCast<OranCommandNr2NrHandover>(cmds.front());
+                NS_TEST_ASSERT_MSG_NE(hoCmd, nullptr, "Command should be OranCommandNr2NrHandover");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetCellId(),
+                                      20,
+                                      "HO should target gNB2 (cellId 20)");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetRnti(), 5, "HO should target RNTI 5");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetE2NodeId(),
+                                      1,
+                                      "HO command should be sent to serving gNB (E2NodeId 1)");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+    }
+};
+
+/**
+ * Verify that OranLmNr2NrRsrpHandover returns no command when the UE's serving
+ * cellId does not match any registered gNB — exercising the oldCellNodeId ==
+ * UINT64_MAX guard added to prevent use of an uninitialized variable.
+ */
+class OranTestCaseNrRsrpLmMissingGnb : public TestCase
+{
+  public:
+    OranTestCaseNrRsrpLmMissingGnb()
+        : TestCase("Oran Test Case NR RSRP LM Missing Serving gNB")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFile = "oran-test-rsrp-lm-missing-gnb.db";
+        Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+        Ptr<OranLmNr2NrRsrpHandover> lm = CreateObject<OranLmNr2NrRsrpHandover>();
+        lm->SetAttribute("NearRtRic", PointerValue(ric));
+        lm->SetAttribute("Verbose", BooleanValue(true));
+
+        Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+            // Register gNBs with cellId 10 and 20
+            ric->Data()->RegisterNodeNrGnb(1, 10);
+            ric->Data()->RegisterNodeNrGnb(2, 20);
+            ric->Data()->RegisterNodeNrUe(3, 100);
+            ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+            // UE reports serving cellId=99 — no gNB has this cellId
+            ric->Data()->SaveNrUeCellInfo(3, 99, 5, Seconds(0.1));
+            // RSRP data: neighbor (cellId 20) is much stronger than serving
+            ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 99, -95.0, -12.0, true, 0);
+            ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -70.0, -8.0, false, 0);
+
+            lm->Activate();
+            auto cmds = lm->Run();
+            NS_TEST_ASSERT_MSG_EQ(
+                cmds.size(),
+                0,
+                "No HO command when serving cellId has no matching gNB");
+        });
+
+        Simulator::Stop(Seconds(0.2));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * Verify that OranLmNr2NrDistanceHandover returns no command when the UE's
+ * serving cellId does not match any registered gNB — exercising the
+ * oldCellNodeId == UINT64_MAX guard.
+ */
+class OranTestCaseNrDistanceLmMissingGnb : public TestCase
+{
+  public:
+    OranTestCaseNrDistanceLmMissingGnb()
+        : TestCase("Oran Test Case NR Distance LM Missing Serving gNB")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFile = "oran-test-distance-lm-missing-gnb.db";
+        Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+        Ptr<OranLmNr2NrDistanceHandover> lm = CreateObject<OranLmNr2NrDistanceHandover>();
+        lm->SetAttribute("NearRtRic", PointerValue(ric));
+        lm->SetAttribute("Verbose", BooleanValue(true));
+
+        Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+            // gNBs with cellId 10 and 20
+            ric->Data()->RegisterNodeNrGnb(1, 10);
+            ric->Data()->RegisterNodeNrGnb(2, 20);
+            ric->Data()->RegisterNodeNrUe(3, 100);
+            ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+            ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+            // UE is near gNB2 but reports serving cellId=99 (no matching gNB)
+            ric->Data()->SavePosition(3, Vector(190, 0, 1.5), Seconds(0.1));
+            ric->Data()->SaveNrUeCellInfo(3, 99, 5, Seconds(0.1));
+
+            lm->Activate();
+            auto cmds = lm->Run();
+            NS_TEST_ASSERT_MSG_EQ(
+                cmds.size(),
+                0,
+                "No HO command when serving cellId has no matching gNB");
+        });
+
+        Simulator::Stop(Seconds(0.2));
+        Simulator::Run();
+        Simulator::Destroy();
+    }
+};
+
+/**
+ * Integration test: set up a minimal NR simulation with two gNBs, attach a UE
+ * to the farther gNB, and verify that the RIC's distance-based Logic Module
+ * triggers a handover to the closer gNB.
+ */
+class OranTestCaseNrDistanceHandover : public TestCase
+{
+  public:
+    OranTestCaseNrDistanceHandover()
+        : TestCase("Oran Test Case NR Distance Handover Integration")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        std::string dbFileName = "oran-test-nr-distance-ho.db";
+        std::remove(dbFileName.c_str());
+
+        Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(30));
+        Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(23));
+        Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
+
+        Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
+        Ptr<NrPointToPointEpcHelper> epcHelper = CreateObject<NrPointToPointEpcHelper>();
+        nrHelper->SetEpcHelper(epcHelper);
+        nrHelper->SetAttribute("UseIdealRrc", BooleanValue(true));
+        nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
+
+        NodeContainer gnbNodes;
+        gnbNodes.Create(2);
+        NodeContainer ueNodes;
+        ueNodes.Create(1);
+
+        Ptr<ListPositionAllocator> gnbPos = CreateObject<ListPositionAllocator>();
+        gnbPos->Add(Vector(0, 0, 25));
+        gnbPos->Add(Vector(200, 0, 25));
+
+        MobilityHelper gnbMob;
+        gnbMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        gnbMob.SetPositionAllocator(gnbPos);
+        gnbMob.Install(gnbNodes);
+
+        Ptr<ListPositionAllocator> uePos = CreateObject<ListPositionAllocator>();
+        uePos->Add(Vector(170, 0, 1.5));
+
+        MobilityHelper ueMob;
+        ueMob.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+        ueMob.SetPositionAllocator(uePos);
+        ueMob.Install(ueNodes);
+
+        nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+        nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+
+        Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
+        channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
+
+        CcBwpCreator ccBwpCreator;
+        CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 10e6, static_cast<uint8_t>(1));
+        OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+        channelHelper->AssignChannelsToBands({band});
+        BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
+
+        NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
+        NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
+
+        // Minimal EPC / internet stack (required for NR attach)
+        NodeContainer remoteHostContainer;
+        remoteHostContainer.Create(1);
+        InternetStackHelper internet;
+        internet.Install(remoteHostContainer);
+
+        PointToPointHelper p2ph;
+        p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
+        p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
+        p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
+        NetDeviceContainer internetDevices = p2ph.Install(epcHelper->GetPgwNode(),
+                                                          remoteHostContainer.Get(0));
+        Ipv4AddressHelper ipv4h;
+        ipv4h.SetBase("1.0.0.0", "255.0.0.0");
+        ipv4h.Assign(internetDevices);
+
+        internet.Install(ueNodes);
+        epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevs));
+
+        nrHelper->AddX2Interface(gnbNodes);
+        // Attach UE to gNB1 (the farther one) — RIC should hand it over to gNB2
+        nrHelper->AttachToGnb(ueDevs.Get(0), gnbDevs.Get(0));
+
+        // O-RAN setup
+        Ptr<OranNearRtRic> nearRtRic = nullptr;
+        OranE2NodeTerminatorContainer e2TermGnbs;
+        OranE2NodeTerminatorContainer e2TermUes;
+        Ptr<OranHelper> oranHelper = CreateObject<OranHelper>();
+
+        oranHelper->SetAttribute("Verbose", BooleanValue(false));
+        oranHelper->SetAttribute("LmQueryInterval", TimeValue(Seconds(1)));
+        oranHelper->SetAttribute("E2NodeInactivityThreshold", TimeValue(Seconds(2)));
+        oranHelper->SetAttribute("E2NodeInactivityIntervalRv",
+                                 StringValue("ns3::ConstantRandomVariable[Constant=2]"));
+        oranHelper->SetAttribute("LmQueryMaxWaitTime", TimeValue(Seconds(0)));
+        oranHelper->SetAttribute("LmQueryLateCommandPolicy", EnumValue(OranNearRtRic::DROP));
+        oranHelper->SetAttribute("RicTransmissionDelayRv",
+                                 StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+
+        oranHelper->SetDataRepository("ns3::OranDataRepositorySqlite",
+                                      "DatabaseFile",
+                                      StringValue(dbFileName));
+        oranHelper->SetDefaultLogicModule(
+            "ns3::OranLmNr2NrDistanceHandover",
+            "ProcessingDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+        oranHelper->SetConflictMitigationModule("ns3::OranCmmNoop");
+
+        nearRtRic = oranHelper->CreateNearRtRic();
+
+        // UE terminators
+        oranHelper->SetE2NodeTerminator(
+            "ns3::OranE2NodeTerminatorNrUe",
+            "RegistrationIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "SendIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "TransmissionDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+        oranHelper->AddReporter("ns3::OranReporterLocation",
+                                "Trigger",
+                                StringValue("ns3::OranReportTriggerPeriodic"));
+        oranHelper->AddReporter(
+            "ns3::OranReporterNrUeCellInfo",
+            "Trigger",
+            StringValue("ns3::OranReportTriggerNrUeHandover[InitialReport=true]"));
+        e2TermUes.Add(oranHelper->DeployTerminators(nearRtRic, ueNodes));
+
+        // gNB terminators
+        oranHelper->SetE2NodeTerminator(
+            "ns3::OranE2NodeTerminatorNrGnb",
+            "RegistrationIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "SendIntervalRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=1]"),
+            "TransmissionDelayRv",
+            StringValue("ns3::ConstantRandomVariable[Constant=0.001]"));
+        oranHelper->AddReporter("ns3::OranReporterLocation",
+                                "Trigger",
+                                StringValue("ns3::OranReportTriggerPeriodic"));
+        e2TermGnbs.Add(oranHelper->DeployTerminators(nearRtRic, gnbNodes));
+
+        Simulator::Schedule(Seconds(1),
+                            &OranHelper::ActivateAndStartNearRtRic,
+                            oranHelper,
+                            nearRtRic);
+        Simulator::Schedule(Seconds(1.5),
+                            &OranHelper::ActivateE2NodeTerminators,
+                            oranHelper,
+                            e2TermGnbs);
+        Simulator::Schedule(Seconds(2),
+                            &OranHelper::ActivateE2NodeTerminators,
+                            oranHelper,
+                            e2TermUes);
+
+        Simulator::Stop(Seconds(8));
+        Simulator::Run();
+
+        // Verify: UE should have handed over to gNB2 (the closer gNB)
+        // The UE's E2 node ID depends on registration order; find it
+        std::vector<uint64_t> ueIds = nearRtRic->Data()->GetNrUeE2NodeIds();
+        NS_TEST_ASSERT_MSG_EQ(ueIds.empty(), false, "No NR UE registered in repository");
+
+        uint64_t ueE2NodeId = ueIds.front();
+        auto [found, cellId, rnti] = nearRtRic->Data()->GetNrUeCellInfo(ueE2NodeId);
+        NS_TEST_ASSERT_MSG_EQ(found, true, "UE cell info not found in repository");
+
+        // gNB2 has cellId 2 (assigned sequentially by NR helper)
+        // The UE started attached to gNB1 (cellId 1) but is at x=170, much
+        // closer to gNB2 at x=200 — the distance LM should have triggered HO
+        NS_TEST_ASSERT_MSG_EQ(cellId, 2, "UE did not hand over to the closer gNB (cellId 2)");
+
+        Simulator::Destroy();
+    }
+};
+
+/**
  * @ingroup oran
  *
  * Test suite for the O-RAN module
@@ -535,6 +972,10 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrUeCellInfo, Duration::QUICK);
     AddTestCase(new OranTestCaseNrUeRsrpRsrq, Duration::QUICK);
     AddTestCase(new OranTestCaseNrReportDispatch, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrRsrpSinrLmDecision, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrRsrpLmMissingGnb, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrDistanceLmMissingGnb, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
 }
 
 static OranTestSuite soranTestSuite;

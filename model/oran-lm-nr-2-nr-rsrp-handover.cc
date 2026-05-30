@@ -174,7 +174,7 @@ OranLmNr2NrRsrpHandover::GetHandoverCommands(
     for (auto ueInfo : ueInfos)
     {
         double max = -DBL_MAX;
-        uint64_t oldCellNodeId;
+        uint64_t oldCellNodeId = UINT64_MAX;
         uint16_t newCellId = ueInfo.cellId;
         auto rsrpMeasurements = data->GetNrUeRsrpRsrq(ueInfo.nodeId);
         for (auto rsrpMeasurement : rsrpMeasurements)
@@ -205,7 +205,15 @@ OranLmNr2NrRsrpHandover::GetHandoverCommands(
             if (ueInfo.cellId == gnbInfo.cellId)
             {
                 oldCellNodeId = gnbInfo.nodeId;
+                break;
             }
+        }
+
+        if (oldCellNodeId == UINT64_MAX)
+        {
+            LogLogicToRepository("Could not find serving gNB E2 Node ID for CellID=" +
+                                 std::to_string(ueInfo.cellId) + ", skipping");
+            continue;
         }
 
         if (newCellId != ueInfo.cellId)
