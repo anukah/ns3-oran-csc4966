@@ -517,6 +517,156 @@ class OranTestCaseNrReportDispatch : public TestCase
 };
 
 /**
+ * Unit test for OranLmNr2NrRsrpSinrHandover decision logic.
+ * Seeds the data repository directly and calls Run() to verify the
+ * two-stage gate: (1) SINR threshold, (2) RSRP with hysteresis.
+ */
+class OranTestCaseNrRsrpSinrLmDecision : public TestCase
+{
+  public:
+    OranTestCaseNrRsrpSinrLmDecision()
+        : TestCase("Oran Test Case NR RSRP+SINR LM Decision Logic")
+    {
+    }
+
+  private:
+    void DoRun() override
+    {
+        // Topology: gNB1 (nodeId=1, cellId=10), gNB2 (nodeId=2, cellId=20)
+        //           UE (nodeId=3, imsi=100) attached to gNB1 (cellId=10, rnti=5)
+        // LM config: SinrThresholdDb=5.0, HysteresisDb=3.0
+
+        // --- Sub-case 1: SINR above threshold → no handover ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-1.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 10 dB → above 5 dB threshold → no handover
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 10.0, 0);
+                // Neighbor has much better RSRP, but SINR gate blocks
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -85.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -70.0, -8.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 1: SINR above threshold should produce no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 2: SINR below threshold, neighbor doesn't beat hysteresis → no HO ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-2.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(100, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 2 dB → below threshold, proceed to RSRP check
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 2.0, 0);
+                // Serving RSRP = -82, neighbor RSRP = -83
+                // -83 <= -82 + 3 = -79, so hysteresis not exceeded → no HO
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -82.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -83.0, -9.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(
+                    cmds.size(),
+                    0,
+                    "Sub-case 2: neighbor RSRP doesn't beat hysteresis, no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 3: SINR below threshold AND neighbor beats hysteresis → handover ---
+        {
+            std::string dbFile = "oran-test-rsrp-sinr-lm-3.db";
+            Ptr<OranNearRtRic> ric = CreateNrTestRic(dbFile);
+
+            Ptr<OranLmNr2NrRsrpSinrHandover> lm =
+                CreateObject<OranLmNr2NrRsrpSinrHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("SinrThresholdDb", DoubleValue(5.0));
+            lm->SetAttribute("HysteresisDb", DoubleValue(3.0));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                ric->Data()->RegisterNodeNrGnb(1, 10);
+                ric->Data()->RegisterNodeNrGnb(2, 20);
+                ric->Data()->RegisterNodeNrUe(3, 100);
+                ric->Data()->SavePosition(1, Vector(0, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(2, Vector(200, 0, 25), Seconds(0.1));
+                ric->Data()->SavePosition(3, Vector(170, 0, 1.5), Seconds(0.1));
+                ric->Data()->SaveNrUeCellInfo(3, 10, 5, Seconds(0.1));
+                // SINR = 2 dB → below threshold
+                ric->Data()->SaveNrUeSinr(3, Seconds(0.1), 10, 5, 2.0, 0);
+                // Serving RSRP = -85, neighbor RSRP = -75
+                // -75 > -85 + 3 = -82 → hysteresis exceeded → handover!
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 10, -85.0, -10.0, true, 0);
+                ric->Data()->SaveNrUeRsrpRsrq(3, Seconds(0.1), 5, 20, -75.0, -8.0, false, 0);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      1,
+                                      "Sub-case 3: should produce exactly 1 HO command");
+
+                Ptr<OranCommandNr2NrHandover> hoCmd =
+                    DynamicCast<OranCommandNr2NrHandover>(cmds.front());
+                NS_TEST_ASSERT_MSG_NE(hoCmd, nullptr, "Command should be OranCommandNr2NrHandover");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetCellId(),
+                                      20,
+                                      "HO should target gNB2 (cellId 20)");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetRnti(), 5, "HO should target RNTI 5");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetE2NodeId(),
+                                      1,
+                                      "HO command should be sent to serving gNB (E2NodeId 1)");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+    }
+};
+
+/**
  * Integration test: set up a minimal NR simulation with two gNBs, attach a UE
  * to the farther gNB, and verify that the RIC's distance-based Logic Module
  * triggers a handover to the closer gNB.
@@ -723,6 +873,7 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrUeCellInfo, Duration::QUICK);
     AddTestCase(new OranTestCaseNrUeRsrpRsrq, Duration::QUICK);
     AddTestCase(new OranTestCaseNrReportDispatch, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrRsrpSinrLmDecision, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
 }
 
