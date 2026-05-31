@@ -146,3 +146,16 @@ build_lib_example(
     ${libapplications}
 )
 
+build_lib_example(
+  NAME vienna-ho-replay
+  SOURCE_FILES vienna-ho-replay.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+)
+
