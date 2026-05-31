@@ -147,6 +147,19 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME oran-nr-2-nr-cmm-handover-example
+  SOURCE_FILES oran-nr-2-nr-cmm-handover-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+)
+
+build_lib_example(
   NAME vienna-ho-replay
   SOURCE_FILES vienna-ho-replay.cc
   LIBRARIES_TO_LINK
