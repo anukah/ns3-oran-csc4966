@@ -50,9 +50,7 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/uniform-planar-array.h"
 
-#include <cfloat>
 #include <cmath>
-#include <fstream>
 
 using namespace ns3;
 
@@ -64,12 +62,7 @@ static const uint16_t PCI_TARGET = 286;
 static std::map<uint16_t, uint16_t> g_cellIdToPci;
 static std::map<uint16_t, uint16_t> g_pciToCellId;
 
-static std::ofstream g_metricsLog;
-static double g_rsrpServing = -DBL_MAX;
-static double g_rsrpNeighbor = -DBL_MAX;
-static double g_sinrServing = -DBL_MAX;
 static uint16_t g_servingCellId = 0;
-static bool g_hoCommandIssued = false;
 static double g_tOffset = 3.0;
 
 void
@@ -93,37 +86,6 @@ CellIdToPci(uint16_t cellId)
 }
 
 void
-TraceRsrpRsrq(uint16_t rnti,
-               uint16_t cellId,
-               double rsrp,
-               double rsrq,
-               bool isServingCell,
-               uint8_t componentCarrierId)
-{
-    if (isServingCell || cellId == g_servingCellId)
-    {
-        g_rsrpServing = rsrp;
-    }
-    else
-    {
-        uint16_t pci = CellIdToPci(cellId);
-        if (pci == PCI_TARGET || pci == PCI_SOURCE)
-        {
-            g_rsrpNeighbor = rsrp;
-        }
-    }
-}
-
-void
-TraceSinr(uint16_t cellId, uint16_t rnti, double sinr, uint16_t bwpId)
-{
-    if (cellId == g_servingCellId)
-    {
-        g_sinrServing = 10.0 * std::log10(sinr);
-    }
-}
-
-void
 NotifyHandoverStart(std::string context,
                     uint64_t imsi,
                     uint16_t cellId,
@@ -134,7 +96,6 @@ NotifyHandoverStart(std::string context,
     std::cout << t << "s HO START: PCI " << CellIdToPci(cellId) << " -> "
               << CellIdToPci(targetCellId) << " (cellId " << cellId << " -> "
               << targetCellId << ")" << std::endl;
-    g_hoCommandIssued = true;
 }
 
 void
@@ -149,32 +110,10 @@ NotifyHandoverEndOk(std::string context,
     g_servingCellId = cellId;
 }
 
-void
-LogMetrics(Ptr<NrUeNetDevice> ueDev, Ptr<Node> ueNode, Time interval)
-{
-    double simTime = Simulator::Now().GetSeconds();
-    double relTime = simTime - g_tOffset;
-
-    g_servingCellId = ueDev->GetCellId();
-    uint16_t servingPci = CellIdToPci(g_servingCellId);
-
-    if (g_metricsLog.is_open())
-    {
-        g_metricsLog << relTime << "," << servingPci << "," << g_rsrpServing << ","
-                     << g_rsrpNeighbor << "," << g_sinrServing << ","
-                     << (g_hoCommandIssued ? 1 : 0) << std::endl;
-    }
-
-    g_hoCommandIssued = false;
-
-    Simulator::Schedule(interval, &LogMetrics, ueDev, ueNode, interval);
-}
-
 int
 main(int argc, char* argv[])
 {
     std::string dbFileName = "vienna-ho-331-286-onnx-lm.db";
-    std::string metricsPath = "vienna-ho-331-286-onnx-metrics.csv";
     std::string onnxModelPath = "nr_rsrp_sinr_logistic.onnx";
     double gnbTxPower = 49.0;
     double ueTxPower = 23.0;
@@ -183,14 +122,12 @@ main(int argc, char* argv[])
     double lmProcessingDelayMs = 10.0;
     double lmQueryIntervalSec = 0.1;
     double e2ReportIntervalSec = 0.1;
-    double metricsIntervalSec = 0.1;
     double simTimeSec = 20.0;
     bool verbose = false;
 
     CommandLine cmd(__FILE__);
     cmd.AddValue("verbose", "Print SQL query results", verbose);
     cmd.AddValue("db-file", "SQLite database file", dbFileName);
-    cmd.AddValue("metrics-log", "CSV metrics output path", metricsPath);
     cmd.AddValue("onnx-model", "Path to the ONNX model file", onnxModelPath);
     cmd.AddValue("gnb-tx-power", "gNB Tx power (dBm)", gnbTxPower);
     cmd.AddValue("ue-tx-power", "UE Tx power (dBm)", ueTxPower);
@@ -199,7 +136,6 @@ main(int argc, char* argv[])
     cmd.AddValue("lm-processing-delay", "LM processing delay (ms)", lmProcessingDelayMs);
     cmd.AddValue("lm-query-interval", "RIC LM query interval (s)", lmQueryIntervalSec);
     cmd.AddValue("e2-report-interval", "E2 report interval (s)", e2ReportIntervalSec);
-    cmd.AddValue("metrics-interval", "CSV logging interval (s)", metricsIntervalSec);
     cmd.AddValue("sim-time", "Total simulation time (s)", simTimeSec);
     cmd.Parse(argc, argv);
 
@@ -208,7 +144,6 @@ main(int argc, char* argv[])
 
     Time simTime = Seconds(simTimeSec);
     Time lmQueryInterval = Seconds(lmQueryIntervalSec);
-    Time metricsInterval = Seconds(metricsIntervalSec);
     std::string lmDelayRv = "ns3::ConstantRandomVariable[Constant=" +
                             std::to_string(lmProcessingDelayMs / 1000.0) + "]";
     std::string e2SendRv = "ns3::ConstantRandomVariable[Constant=" +
@@ -455,10 +390,6 @@ main(int argc, char* argv[])
                 uePhy->TraceConnectWithoutContext(
                     "DlCtrlSinr",
                     MakeCallback(&OranReporterNrUeSinr::ReportSinr, sinrReporter));
-                uePhy->TraceConnectWithoutContext("ReportUeMeasurements",
-                                                  MakeCallback(&TraceRsrpRsrq));
-                uePhy->TraceConnectWithoutContext("DlCtrlSinr",
-                                                  MakeCallback(&TraceSinr));
                 break;
             }
         }
@@ -519,26 +450,12 @@ main(int argc, char* argv[])
     Config::Connect("/NodeList/*/DeviceList/*/NrUeRrc/HandoverStart",
                     MakeCallback(&NotifyHandoverStart));
 
-    g_metricsLog.open(metricsPath);
-    g_metricsLog
-        << "sim_time_s,serving_pci,rsrp_serving_dbm,rsrp_neighbor_286_dbm,sinr_serving_db,"
-           "ho_command_issued"
-        << std::endl;
-
-    Simulator::Schedule(Seconds(g_tOffset),
-                        &LogMetrics,
-                        ueNetDev,
-                        ueNodes.Get(0),
-                        metricsInterval);
-
     Simulator::Stop(simTime);
     Simulator::Run();
 
     std::cout << "\n=== Simulation complete (ONNX LM) ===" << std::endl;
-    std::cout << "Metrics CSV: " << metricsPath << std::endl;
     std::cout << "SQLite DB:   " << dbFileName << std::endl;
 
-    g_metricsLog.close();
     Simulator::Destroy();
 
     return 0;
