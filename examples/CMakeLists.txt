@@ -172,3 +172,18 @@ build_lib_example(
     ${libapplications}
 )
 
+if(${OnnxRuntime_FOUND})
+  build_lib_example(
+    NAME oran-nr-2-nr-rsrp-sinr-onnx-handover-example
+    SOURCE_FILES oran-nr-2-nr-rsrp-sinr-onnx-handover-example.cc
+    LIBRARIES_TO_LINK
+      ${liboran}
+      ${libnetwork}
+      ${libnr}
+      ${libmobility}
+      ${libinternet}
+      ${libpoint-to-point}
+      ${libapplications}
+  )
+endif()
+
