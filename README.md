@@ -47,6 +47,13 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [Vienna Drive-Test Replay Example](#vienna-drive-test-replay-example)
   * [NR to NR RSRP SINR ONNX Handover Example](#nr-to-nr-rsrp-sinr-onnx-handover-example)
 * [Testing](#testing)
+* [Reproducing the ONNX Handover Pipeline](#reproducing-the-onnx-handover-pipeline)
+  * [Step 1: Run the Rule-Based Handover Replay](#step-1-run-the-rule-based-handover-replay)
+  * [Step 2: Set Up the Python Environment](#step-2-set-up-the-python-environment)
+  * [Step 3: Extract the Database to CSV](#step-3-extract-the-database-to-csv)
+  * [Step 4: Train the Logistic Regression Model](#step-4-train-the-logistic-regression-model)
+  * [Step 5: Run the ONNX Handover Example](#step-5-run-the-onnx-handover-example)
+  * [Step 6: Extract and Compare Results](#step-6-extract-and-compare-results)
 
 # Project Overview
 This project has been developed by the National Institute of Standards and Technology (NIST)
@@ -700,6 +707,145 @@ cp contrib/oran/examples/nr_rsrp_sinr_logistic.onnx .
 
 ./ns3 run "oran-nr-2-nr-rsrp-sinr-onnx-handover-example --verbose"
 ```
+
+# Reproducing the ONNX Handover Pipeline
+
+This section walks through the full pipeline for reproducing the ML-based
+handover results, from generating training data to running the ONNX model
+inside ns-3. All commands assume you are in the ns-3 root directory.
+
+## Step 1: Run the Rule-Based Handover Replay
+
+First, run the Vienna drive-test replay scenario. This uses the rule-based
+Logic Module (`OranLmNr2NrRsrpSinrHandover`) to generate handover decisions
+and stores all metrics in a SQLite database.
+
+```shell
+./ns3 run "vienna-ho-replay --verbose"
+```
+
+This produces `vienna-ho-331-286-rsrp-sinr-lm.db` in the working directory.
+The database contains per-tick RSRP, RSRQ, SINR, UE location, and handover
+command records logged by the O-RAN Near-RT RIC.
+
+## Step 2: Set Up the Python Environment
+
+Create a Python virtual environment and install the dependencies needed for
+data extraction and model training.
+
+```shell
+cd contrib/oran/examples
+
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Return to the ns-3 root directory for subsequent steps:
+
+```shell
+cd ../../..
+```
+
+## Step 3: Extract the Database to CSV
+
+Use the extraction script to sample the SQLite database at 0.1 s intervals and
+produce a CSV file suitable for model training.
+
+```shell
+source contrib/oran/examples/venv/bin/activate
+
+python3 contrib/oran/examples/extract_db_to_csv.py \
+    vienna-ho-331-286-rsrp-sinr-lm.db \
+    -o vienna-ho-331-286-extracted-0.1s.csv
+```
+
+The output CSV contains the following columns:
+
+| Column | Description |
+|--------|-------------|
+| `sim_time_s` | Relative simulation time (seconds) |
+| `serving_pci` | PCI of the serving cell |
+| `rsrp_serving_dbm` | RSRP from the serving cell (dBm) |
+| `neighbor_pci` | PCI of the strongest neighbour |
+| `rsrp_neighbor_dbm` | RSRP from the neighbour cell (dBm) |
+| `sinr_serving_db` | SINR of the serving cell (dB) |
+| `ue_x`, `ue_y` | Interpolated UE position (metres) |
+| `dist_serving_m` | 3D distance to the serving gNB (metres) |
+| `dist_neighbor_m` | 3D distance to the neighbour gNB (metres) |
+| `ho_command_issued` | 1 if the LM issued a handover at this tick, 0 otherwise |
+
+## Step 4: Train the Logistic Regression Model
+
+Train a logistic regression classifier on the extracted CSV. The script
+handles class imbalance with SMOTE, engineers an `rsrp_diff` feature, fits a
+`StandardScaler` + `LogisticRegression` pipeline, and exports the full
+pipeline to ONNX format.
+
+```shell
+# Copy the CSV to the examples directory where the training script expects it
+cp vienna-ho-331-286-extracted-0.1s.csv contrib/oran/examples/
+cd contrib/oran/examples
+
+source venv/bin/activate
+python3 nr_rsrp_sinr_logistic.py
+```
+
+This produces `nr_rsrp_sinr_logistic.onnx` in the current directory. The ONNX
+model takes two float32 inputs: `[sinr_serving_db, rsrp_diff]` and outputs a
+binary handover decision (0 or 1).
+
+Copy the trained model to the ns-3 working directory:
+
+```shell
+cp nr_rsrp_sinr_logistic.onnx ../../..
+cd ../../..
+```
+
+> **Note:** A pre-trained ONNX model is already included in the `examples/`
+> directory. You may skip this step if you do not need to retrain the model.
+
+## Step 5: Run the ONNX Handover Example
+
+Run the same Vienna drive-test scenario, but this time using the trained ONNX
+model (`OranLmNr2NrRsrpSinrOnnxHandover`) to make handover decisions instead
+of rule-based thresholds.
+
+```shell
+# The ONNX model must be in the ns-3 root directory because ./ns3 run
+# executes examples from there, and the C++ code loads the model by
+# relative path (default: "nr_rsrp_sinr_logistic.onnx").
+cp contrib/oran/examples/nr_rsrp_sinr_logistic.onnx .
+
+./ns3 run "oran-nr-2-nr-rsrp-sinr-onnx-handover-example --verbose"
+```
+
+This produces `vienna-ho-331-286-onnx-lm.db` containing the ONNX-driven
+simulation results.
+
+## Step 6: Extract and Compare Results
+
+Extract the ONNX simulation database to CSV using the same script, then
+compare the rule-based and ML-based handover outcomes.
+
+```shell
+source contrib/oran/examples/venv/bin/activate
+
+python3 contrib/oran/examples/extract_db_to_csv.py \
+    vienna-ho-331-286-onnx-lm.db \
+    -o vienna-ho-onnx-extracted-0.1s.csv
+```
+
+You now have two CSVs that can be compared side by side:
+
+| File | Handover Logic |
+|------|----------------|
+| `vienna-ho-331-286-extracted-0.1s.csv` | Rule-based (`OranLmNr2NrRsrpSinrHandover`) |
+| `vienna-ho-onnx-extracted-0.1s.csv` | ML-based (`OranLmNr2NrRsrpSinrOnnxHandover`) |
+
+The `ho_command_issued` column in each CSV marks when each Logic Module
+triggered a handover, allowing direct comparison of timing and decision
+quality between the two approaches.
 
 # Testing
 The module includes a test suite with 12 test cases (1 upstream + 11 NR)
