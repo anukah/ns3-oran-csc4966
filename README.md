@@ -11,6 +11,7 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [Contact](#contact)
 * [Model Description](#model-description)
 * [Features](#features)
+  * [NR (5G) Support](#nr-5g-support)
 * [Minimum Requirements](#minimum-requirements)
   * [Optional Dependencies](#optional-dependencies)
 * [Installation](#installation)
@@ -40,6 +41,12 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [Multiple Network Devices Example](#multiple-network-devices-example)
   * [LTE to LTE ML Handover Example](#lte-to-lte-ml-handover-example)
   * [LTE to LTE RSRP Handover LM Example](#lte-to-lte-rsrp-handover-lm-example)
+  * [NR to NR Distance Handover Example](#nr-to-nr-distance-handover-example)
+  * [NR to NR RSRP Handover LM Example](#nr-to-nr-rsrp-handover-lm-example)
+  * [NR to NR CMM Handover Example](#nr-to-nr-cmm-handover-example)
+  * [Vienna Drive-Test Replay Example](#vienna-drive-test-replay-example)
+  * [NR to NR RSRP SINR ONNX Handover Example](#nr-to-nr-rsrp-sinr-onnx-handover-example)
+* [Testing](#testing)
 
 # Project Overview
 This project has been developed by the National Institute of Standards and Technology (NIST)
@@ -109,11 +116,39 @@ This release of the `oran` module contains the following features:
 - Integration with [ONNX Runtime](https://onnxruntime.ai/) and
   [PyTorch](https://pytorch.org/) to support Machine Learning (ML)
 
+## NR (5G) Support
+This fork extends the original LTE-only module with full 5G NR support,
+mirroring the existing LTE pipeline 1:1 for NR networks. The NR extensions
+require the [5G-LENA](https://5g-lena.cttc.es/) module to be installed in the
+`ns-3` `contrib/` directory. The NR-specific features include:
+- E2 Node Terminators for NR gNBs (`OranE2NodeTerminatorNrGnb`) and NR UEs
+  (`OranE2NodeTerminatorNrUe`)
+- Reporting capabilities for NR UE cell attachment, NR UE RSRP/RSRQ
+  measurements, and NR UE DL Control SINR measurements
+- Generation and execution of NR-to-NR handover Commands
+  (`OranCommandNr2NrHandover`)
+- Report Trigger for NR UE handover events
+  (`OranReportTriggerNrUeHandover`)
+- SQLite data repository extensions with five new tables (`nrgnb`, `nrue`,
+  `nruecell`, `nruersrprsrq`, `nruesinr`)
+- NR-native Logic Modules (xApps):
+  - `OranLmNr2NrDistanceHandover` - hands UEs over to the closest gNB by
+    position
+  - `OranLmNr2NrRsrpHandover` - hands UEs over to the gNB with the
+    strongest RSRP
+  - `OranLmNr2NrRsrpSinrHandover` - SINR-gated RSRP handover that only
+    triggers when the serving cell SINR drops below a configurable threshold
+  - `OranLmNr2NrRsrpSinrOnnxHandover` - ML-based handover using an ONNX
+    model that takes SINR and RSRP difference as inputs
+- Extended Conflict Mitigation Modules (`OranCmmHandover` and
+  `OranCmmSingleCommandPerNode`) to recognize and filter NR handover commands
+
 # Minimum Requirements
 * ns-3.42
 * SQLite 3.7.17
 
 ## Optional Dependencies
+* 5G-LENA (for NR support)
 * ONNX Runtime 1.14.1
 * PyTorch 2.2.2
 
@@ -346,6 +381,21 @@ There is also the
 that we will discuss later that demonstrates the use
 of these two classes using existing ML models included with this module.
 
+For NR networks, an ONNX-based Logic Module is also provided:
+- OranLmNr2NrRsrpSinrOnnxHandover
+
+This LM loads a trained ONNX model that takes two input features
+(`sinr_serving_db` and `rsrp_diff`) and outputs a binary handover decision.
+A training script (`examples/nr_rsrp_sinr_logistic.py`) and a pre-trained
+model (`examples/nr_rsrp_sinr_logistic.onnx`) are included with the module.
+See the
+[NR to NR RSRP SINR ONNX Handover Example](#nr-to-nr-rsrp-sinr-onnx-handover-example)
+for a demonstration.
+
+OranLmNr2NrRsrpSinrOnnxHandover is defined by the files:
+- 'model/oran-lm-nr-2-nr-rsrp-sinr-onnx-handover.h'
+- 'model/oran-lm-nr-2-nr-rsrp-sinr-onnx-handover.cc'
+
 ## ONNX
 At the time that this documentation was created, not very many linux
 distributions provide ONNX packages. However, the use of ONNX for this module
@@ -574,4 +624,89 @@ measurements that are reported by the UE to trigger handovers.
 
 ```shell
 ./ns3 run "oran-lte-2-lte-rsrp-handover-lm-example"
+```
+
+## NR to NR Distance Handover Example
+This scenario demonstrates NR-to-NR handover driven by physical distance. It
+consists of 3 NR gNBs spaced 500 m apart and 1 NR UE that moves at 60 km/h
+along the line of gNBs. The Logic Module (`OranLmNr2NrDistanceHandover`) in
+the RIC periodically computes the distance from the UE to each gNB and
+issues a handover Command when a closer gNB is found.
+
+```shell
+./ns3 run "oran-nr-2-nr-distance-handover-example --verbose"
+```
+
+## NR to NR RSRP Handover LM Example
+Similar to the
+[NR to NR Distance Handover Example](#nr-to-nr-distance-handover-example),
+however, in this scenario the Logic Module (`OranLmNr2NrRsrpHandover`) uses
+RSRP measurements reported by the NR UE to determine the best serving cell.
+The UE's NR PHY layer reports per-cell RSRP values to the RIC, and the LM
+triggers a handover when a neighbouring cell has a stronger RSRP than the
+current serving cell.
+
+```shell
+./ns3 run "oran-nr-2-nr-rsrp-handover-lm-example --verbose"
+```
+
+## NR to NR CMM Handover Example
+This example demonstrates the Conflict Mitigation Module (`OranCmmHandover`)
+operating with NR handover commands. It uses the same 2-gNB bouncing-UE
+scenario as the RSRP example but with a 1-second LM query interval (instead
+of 5 seconds) to increase the chance of generating duplicate commands while a
+handover is still in flight. The CMM filters out duplicate NR handover
+commands targeting the same UE and cell.
+
+```shell
+./ns3 run "oran-nr-2-nr-cmm-handover-example --verbose"
+```
+
+To verify that duplicate commands were filtered, inspect the CMM action log:
+
+```shell
+sqlite3 oran-repository.db "SELECT * FROM cmmaction ORDER BY time;"
+```
+
+## Vienna Drive-Test Replay Example
+This example replays a real handover event observed in a Vienna 5G drive-test
+dataset. The scenario reproduces a PCI 331 to PCI 286 handover using two NR
+gNBs positioned according to real tower coordinates, with a UE following GPS
+waypoints from the original recording. The Logic Module
+(`OranLmNr2NrRsrpSinrHandover`) uses a combination of serving-cell SINR and
+neighbour RSRP to make handover decisions. SINR and hysteresis thresholds are
+configurable via command-line arguments.
+
+```shell
+./ns3 run "vienna-ho-replay --verbose"
+```
+
+## NR to NR RSRP SINR ONNX Handover Example
+Note that in order to run this example, the ONNX libraries must be found
+during the configuration of `ns-3`, and it is assumed that the ML model file
+"nr_rsrp_sinr_logistic.onnx" has been copied from the example directory to
+the working directory.
+
+This example uses the same Vienna drive-test replay scenario as the
+[Vienna Drive-Test Replay Example](#vienna-drive-test-replay-example),
+however, the handover decision is made by a trained ONNX ML model
+(`OranLmNr2NrRsrpSinrOnnxHandover`) instead of rule-based thresholds. The
+model takes two input features (serving-cell SINR in dB and RSRP difference
+between serving and best neighbour) and outputs a binary handover decision.
+
+```shell
+# Copy the ONNX model to the working directory
+cp contrib/oran/examples/nr_rsrp_sinr_logistic.onnx .
+
+./ns3 run "oran-nr-2-nr-rsrp-sinr-onnx-handover-example --verbose"
+```
+
+# Testing
+The module includes a test suite with 12 test cases (1 upstream + 11 NR)
+covering reports, repository operations, E2 dispatch, Logic Module decision
+logic, and missing-gNB guard handling. All NR tests run without an NR radio
+stack, using direct DB API calls and the generic `OranE2NodeTerminatorWired`.
+
+```shell
+./test.py -s oran -v
 ```
