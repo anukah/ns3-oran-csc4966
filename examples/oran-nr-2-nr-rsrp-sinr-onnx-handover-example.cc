@@ -1,56 +1,43 @@
 /**
- * Vienna single-HO replay: PCI 331 (gNB 13) -> PCI 286 (gNB 11)
+ * NIST-developed software is provided by NIST as a public service. You may
+ * use, copy and distribute copies of the software in any medium, provided that
+ * you keep intact this entire notice. You may improve, modify and create
+ * derivative works of the software or any portion of the software, and you may
+ * copy and distribute such modifications or works. Modified works should carry
+ * a notice stating that you changed the software and should note the date and
+ * nature of any such change. Please explicitly acknowledge the National
+ * Institute of Standards and Technology as the source of the software.
  *
- * Reproduces the inter-gNB handover observed at 2025-02-08 03:35:14.766 UTC
- * in the Vienna 5G drive-test dataset.  Both cells are operator A, band n78
- * @ 3540 MHz TDD.  The O-RAN Near-RT RIC runs OranLmNr2NrRsrpSinrHandover
- * as the default Logic Module.
+ * NIST-developed software is expressly provided "AS IS." NIST MAKES NO
+ * WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT OR ARISING BY OPERATION OF
+ * LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT AND DATA ACCURACY. NIST
+ * NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE
+ * UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST
+ * DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE
+ * SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE
+ * CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
  *
- * === PARAMETER PROVENANCE ===
+ * You are solely responsible for determining the appropriateness of using and
+ * distributing the software and you assume all risks associated with its use,
+ * including but not limited to the risks and costs of program errors,
+ * compliance with applicable laws, damage to or loss of data, programs or
+ * equipment, and the unavailability or interruption of operation. This
+ * software is not intended to be used in any situation where a failure could
+ * cause risk of injury or damage to property. The software developed by NIST
+ * employees is not subject to copyright protection within the United States.
+ */
+
+/**
+ * Vienna single-HO replay using ONNX ML-based handover decision.
  *
- * FROM DATASET (Vienna drive-test 2025-02-08):
- *   - gNB 13 position          (0, 0, 36) m  (ENU origin)
- *   - gNB 11 position          (592.62, -431.55, 58) m
- *   - gNB 13 mech. azimuth     145 deg
- *   - gNB 11 mech. azimuth     155 deg
- *   - Center frequency          3540 MHz (n78, channel 636000)
- *   - UE waypoints (10 pts)    from GPS, height 1.5 m
- *   - UE mean speed             ~6 m/s
- *   - Real HO time              t=10.766 s (relative to 03:35:04.000)
+ * Same scenario as vienna-ho-replay.cc (PCI 331 -> PCI 286, Vienna drive-test)
+ * but replaces the rule-based OranLmNr2NrRsrpSinrHandover with the ONNX-based
+ * OranLmNr2NrRsrpSinrOnnxHandover that uses a trained logistic regression
+ * model (nr_rsrp_sinr_logistic.onnx) for handover decisions.
  *
- * 3GPP DEFAULTS / ASSUMED (calibration knobs):
- *   - gNB Tx power              49 dBm  (3GPP 38.104 Table 6.2.1-1, macro)
- *   - UE Tx power               23 dBm  (3GPP 38.101 default)
- *   - Bandwidth                  100 MHz (n78 typical, not from dataset)
- *   - TDD pattern                DDDSU   (common n78 config, not measured)
- *   - Numerology                 mu=1, 30 kHz SCS
- *   - gNB antenna                8x8 cross-pol (assumed macro panel)
- *   - UE antenna                 2x2
- *   - Downtilt                   6 deg   (typical urban macro)
- *   - Pol slant angle            45 deg  (cross-pol convention)
- *   - Propagation model          3GPP TR 38.901 UMa, NLOS, shadowing ON
- *   - LM SinrThresholdDb         32.0 dB (raised from 5.0 default; see note below)
- *   - LM HysteresisDb            0.0 dB  (reduced from 3.0 default; see note below)
- *   - LM ProcessingDelay         10 ms
- *   - RIC query interval         0.1 s
- *   - E2 report interval         0.1 s (100 ms)
- *   - Building model             NONE (follow-up task)
- *
- * DATASET LIMITATION — SINR THRESHOLD:
- *   The dataset only contains gNB info for the two cells involved in this HO.
- *   The real network has 20+ co-channel n78 cells whose interference drives
- *   serving SINR down to ~5 dB.  With only 2 cells the simulated SINR is
- *   ~25 dB higher than reality (~30 dB vs ~5 dB).  The SINR threshold is
- *   therefore raised from the LM default (5 dB) to 30 dB to compensate for
- *   the missing inter-cell interference.  This is a calibration knob:
- *   --sinr-threshold=<value> on the command line.
- *
- * DATASET LIMITATION — RSRP HYSTERESIS:
- *   The real network uses beam-level measurements (L1-RSRP per SSB beam)
- *   for HO decisions, while this LM only sees cell-wide RSRP aggregated
- *   across beams.  Setting hysteresis to 0 dB at cell level approximates
- *   what a beam-level decision with 3 dB hysteresis would produce.
- *   Calibration knob: --hysteresis=<value> on the command line.
+ * The ONNX model takes [sinr_serving_db, rsrp_diff] as input features and
+ * outputs a binary label: 1 = handover recommended.
  */
 
 #include "ns3/applications-module.h"
@@ -67,19 +54,29 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("ViennaHo331286RsrpSinrLm");
+NS_LOG_COMPONENT_DEFINE("OranNr2NrRsrpSinrOnnxHandoverExample");
 
-// ─── Real PCI assignments ────────────────────────────────────────────────────
-static const uint16_t PCI_SOURCE = 331; // gNB 13 (source)
-static const uint16_t PCI_TARGET = 286; // gNB 11 (target)
+static const uint16_t PCI_SOURCE = 331;
+static const uint16_t PCI_TARGET = 286;
 
-// ─── cellId <-> PCI mapping (populated after InstallGnbDevice) ───────────────
 static std::map<uint16_t, uint16_t> g_cellIdToPci;
 static std::map<uint16_t, uint16_t> g_pciToCellId;
 
-// ─── Simulation state ────────────────────────────────────────────────────────
 static uint16_t g_servingCellId = 0;
 static double g_tOffset = 3.0;
+
+void
+QueryRcSink(std::string query, std::string args, int rc)
+{
+    std::cout << Simulator::Now().GetSeconds() << " Query "
+              << ((rc == SQLITE_OK || rc == SQLITE_DONE) ? "OK" : "ERROR") << "(" << rc
+              << "): \"" << query << "\"";
+    if (!args.empty())
+    {
+        std::cout << " (" << args << ")";
+    }
+    std::cout << std::endl;
+}
 
 static uint16_t
 CellIdToPci(uint16_t cellId)
@@ -88,7 +85,6 @@ CellIdToPci(uint16_t cellId)
     return (it != g_cellIdToPci.end()) ? it->second : 0;
 }
 
-// ─── Handover trace callbacks ────────────────────────────────────────────────
 void
 NotifyHandoverStart(std::string context,
                     uint64_t imsi,
@@ -114,32 +110,15 @@ NotifyHandoverEndOk(std::string context,
     g_servingCellId = cellId;
 }
 
-// ─── SQL debug callback ──────────────────────────────────────────────────────
-void
-QueryRcSink(std::string query, std::string args, int rc)
-{
-    std::cout << Simulator::Now().GetSeconds() << " Query "
-              << ((rc == SQLITE_OK || rc == SQLITE_DONE) ? "OK" : "ERROR") << "(" << rc
-              << "): \"" << query << "\"";
-    if (!args.empty())
-    {
-        std::cout << " (" << args << ")";
-    }
-    std::cout << std::endl;
-}
-
-// ─── main ────────────────────────────────────────────────────────────────────
 int
 main(int argc, char* argv[])
 {
-    // --- Configurable parameters (all with 3GPP defaults unless noted) ---
-    std::string dbFileName = "vienna-ho-331-286-rsrp-sinr-lm.db";
+    std::string dbFileName = "vienna-ho-331-286-onnx-lm.db";
+    std::string onnxModelPath = "nr_rsrp_sinr_logistic.onnx";
     double gnbTxPower = 49.0;
     double ueTxPower = 23.0;
     double bandwidthHz = 100e6;
     uint8_t numerology = 1;
-    double sinrThreshold = 32.0;
-    double hysteresisDb = 0.0;
     double lmProcessingDelayMs = 10.0;
     double lmQueryIntervalSec = 0.1;
     double e2ReportIntervalSec = 0.1;
@@ -149,12 +128,11 @@ main(int argc, char* argv[])
     CommandLine cmd(__FILE__);
     cmd.AddValue("verbose", "Print SQL query results", verbose);
     cmd.AddValue("db-file", "SQLite database file", dbFileName);
-    cmd.AddValue("gnb-tx-power", "gNB Tx power (dBm) [3GPP default]", gnbTxPower);
-    cmd.AddValue("ue-tx-power", "UE Tx power (dBm) [3GPP default]", ueTxPower);
-    cmd.AddValue("bandwidth", "Channel bandwidth (Hz) [assumed]", bandwidthHz);
-    cmd.AddValue("numerology", "NR numerology 0-4 [assumed mu=1]", numerology);
-    cmd.AddValue("sinr-threshold", "LM SINR gate (dB) [LM default]", sinrThreshold);
-    cmd.AddValue("hysteresis", "LM RSRP hysteresis (dB) [LM default]", hysteresisDb);
+    cmd.AddValue("onnx-model", "Path to the ONNX model file", onnxModelPath);
+    cmd.AddValue("gnb-tx-power", "gNB Tx power (dBm)", gnbTxPower);
+    cmd.AddValue("ue-tx-power", "UE Tx power (dBm)", ueTxPower);
+    cmd.AddValue("bandwidth", "Channel bandwidth (Hz)", bandwidthHz);
+    cmd.AddValue("numerology", "NR numerology 0-4", numerology);
     cmd.AddValue("lm-processing-delay", "LM processing delay (ms)", lmProcessingDelayMs);
     cmd.AddValue("lm-query-interval", "RIC LM query interval (s)", lmQueryIntervalSec);
     cmd.AddValue("e2-report-interval", "E2 report interval (s)", e2ReportIntervalSec);
@@ -171,37 +149,32 @@ main(int argc, char* argv[])
     std::string e2SendRv = "ns3::ConstantRandomVariable[Constant=" +
                            std::to_string(e2ReportIntervalSec) + "]";
 
-    // --- PHY defaults ---
     Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(gnbTxPower));
     Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(ueTxPower));
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
     Config::SetDefault("ns3::NrUePhy::UeMeasurementsFilterPeriod",
                        TimeValue(MilliSeconds(50)));
 
-    // --- NR helpers ---
     Ptr<NrHelper> nrHelper = CreateObject<NrHelper>();
     Ptr<NrPointToPointEpcHelper> epcHelper = CreateObject<NrPointToPointEpcHelper>();
     nrHelper->SetEpcHelper(epcHelper);
     nrHelper->SetAttribute("UseIdealRrc", BooleanValue(true));
     nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
 
-    // --- Create nodes ---
     NodeContainer gnbNodes;
     gnbNodes.Create(2);
     NodeContainer ueNodes;
     ueNodes.Create(1);
 
-    // --- gNB placement (ENU, origin = gNB 13) ---
     Ptr<ListPositionAllocator> gnbPosAlloc = CreateObject<ListPositionAllocator>();
-    gnbPosAlloc->Add(Vector(0.0, 0.0, 36.0));          // gNB 13 (PCI 331)
-    gnbPosAlloc->Add(Vector(592.62, -431.55, 58.0));    // gNB 11 (PCI 286)
+    gnbPosAlloc->Add(Vector(0.0, 0.0, 36.0));
+    gnbPosAlloc->Add(Vector(592.62, -431.55, 58.0));
 
     MobilityHelper gnbMobility;
     gnbMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     gnbMobility.SetPositionAllocator(gnbPosAlloc);
     gnbMobility.Install(gnbNodes);
 
-    // --- UE trajectory via WaypointMobilityModel ---
     MobilityHelper ueMobility;
     ueMobility.SetMobilityModel("ns3::WaypointMobilityModel",
                                 "InitialPositionIsWaypoint",
@@ -213,27 +186,24 @@ main(int argc, char* argv[])
 
     struct WP { double t; double x; double y; };
     const WP waypoints[] = {
-        // All values measured from phone_data_5g.parquet,
-          // PCI ∈ {331, 286, 285}, window 03:35:04.000 → 03:35:20.800 UTC.
-          // Real HO from 331 → 286 occurs at t = 10.766 s.
-          { 0.14,  312.65, -178.69},
-          { 0.66,  308.58, -174.46},
-          { 1.67,  304.72, -169.79},
-          { 2.67,  300.79, -164.79},
-          { 3.72,  296.79, -160.12},
-          { 4.72,  293.01, -155.01},
-          { 5.73,  289.01, -150.34},
-          { 6.73,  284.93, -145.67},
-          { 7.75,  281.08, -140.55},
-          { 8.74,  277.30, -135.88},
-          { 9.74,  273.22, -132.10},
-          {10.77,  269.22, -126.98},   // real HO ~here (03:35:14.766 UTC)
-          {11.78,  265.14, -122.31},
-          {12.79,  261.43, -117.64},
-          {13.78,  257.65, -113.86},
-          {14.76,  253.95, -109.19},
-          {15.79,  250.17, -104.52},
-          {16.80,  246.17, -100.30},
+        { 0.14,  312.65, -178.69},
+        { 0.66,  308.58, -174.46},
+        { 1.67,  304.72, -169.79},
+        { 2.67,  300.79, -164.79},
+        { 3.72,  296.79, -160.12},
+        { 4.72,  293.01, -155.01},
+        { 5.73,  289.01, -150.34},
+        { 6.73,  284.93, -145.67},
+        { 7.75,  281.08, -140.55},
+        { 8.74,  277.30, -135.88},
+        { 9.74,  273.22, -132.10},
+        {10.77,  269.22, -126.98},
+        {11.78,  265.14, -122.31},
+        {12.79,  261.43, -117.64},
+        {13.78,  257.65, -113.86},
+        {14.76,  253.95, -109.19},
+        {15.79,  250.17, -104.52},
+        {16.80,  246.17, -100.30},
     };
 
     for (const auto& wp : waypoints)
@@ -242,8 +212,6 @@ main(int argc, char* argv[])
             Waypoint(Seconds(wp.t + g_tOffset), Vector(wp.x, wp.y, 1.5)));
     }
 
-    // --- Antenna configuration ---
-    // gNB: 8x8 cross-pol panel, 6 deg downtilt, 45 deg pol slant
     nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(8));
     nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(8));
     nrHelper->SetGnbAntennaAttribute("IsDualPolarized", BooleanValue(true));
@@ -253,15 +221,12 @@ main(int argc, char* argv[])
                                      DoubleValue(6.0 * M_PI / 180.0));
     nrHelper->SetGnbAntennaAttribute("PolSlantAngle",
                                      DoubleValue(45.0 * M_PI / 180.0));
-    // UE: 2x2
     nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(2));
     nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(2));
 
-    // --- Channel model: 3GPP UMa with shadowing ---
     Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
     channelHelper->ConfigureFactories("UMa", "Default", "ThreeGpp");
 
-    // --- Band n78: 3540 MHz center, 100 MHz BW, mu=1 ---
     CcBwpCreator ccBwpCreator;
     CcBwpCreator::SimpleOperationBandConf bandConf(3.54e9, bandwidthHz,
                                                    static_cast<uint8_t>(numerology));
@@ -270,14 +235,10 @@ main(int argc, char* argv[])
 
     BandwidthPartInfoPtrVector allBwps = CcBwpCreator::GetAllBwps({band});
 
-    // --- Install devices ---
     NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
 
-    // --- Per-gNB antenna bearing (set after install) ---
-    // Azimuth convention: dataset = clockwise from North
-    // NS-3 BearingAngle = counter-clockwise from East = (90 - azimuth) deg
-    double azimuths[] = {145.0, 155.0}; // gNB 13, gNB 11
+    double azimuths[] = {145.0, 155.0};
     uint16_t realPcis[] = {PCI_SOURCE, PCI_TARGET};
 
     for (uint32_t i = 0; i < gnbDevs.GetN(); i++)
@@ -294,7 +255,6 @@ main(int argc, char* argv[])
             DynamicCast<UniformPlanarArray>(phy->GetSpectrumPhy()->GetAntenna());
         antenna->SetAttribute("BearingAngle", DoubleValue(bearingRad));
 
-        // TDD pattern: DDDSU
         phy->SetAttribute("Pattern", StringValue("DL|DL|DL|S|UL|"));
 
         std::cout << "gNB[" << i << "] cellId=" << cellId << " PCI=" << realPcis[i]
@@ -302,7 +262,6 @@ main(int argc, char* argv[])
                   << " deg" << std::endl;
     }
 
-    // --- EPC / Internet ---
     NodeContainer remoteHostContainer;
     remoteHostContainer.Create(1);
     Ptr<Node> remoteHost = remoteHostContainer.Get(0);
@@ -329,7 +288,6 @@ main(int argc, char* argv[])
     Ipv4InterfaceContainer ueIpIfaces =
         epcHelper->AssignUeIpv4Address(NetDeviceContainer(ueDevs));
 
-    // --- X2 + initial attachment to gNB 13 (PCI 331) ---
     nrHelper->AddX2Interface(gnbNodes);
     nrHelper->AttachToGnb(ueDevs.Get(0), gnbDevs.Get(0));
 
@@ -338,7 +296,6 @@ main(int argc, char* argv[])
     std::cout << "Initial attachment: cellId=" << g_servingCellId
               << " PCI=" << CellIdToPci(g_servingCellId) << std::endl;
 
-    // --- Full-buffer DL traffic ---
     uint16_t dlPort = 10000;
     UdpClientHelper dlClient(ueIpIfaces.GetAddress(0), dlPort);
     dlClient.SetAttribute("Interval", TimeValue(MilliSeconds(1)));
@@ -353,7 +310,7 @@ main(int argc, char* argv[])
     serverApps.Start(Seconds(0.5));
 
     // ═══════════════════════════════════════════════════════════════════════
-    // O-RAN setup
+    // O-RAN setup with ONNX-based Logic Module
     // ═══════════════════════════════════════════════════════════════════════
     if (!dbFileName.empty())
     {
@@ -380,11 +337,9 @@ main(int argc, char* argv[])
                                   "DatabaseFile",
                                   StringValue(dbFileName));
 
-    oranHelper->SetDefaultLogicModule("ns3::OranLmNr2NrRsrpSinrHandover",
-                                      "SinrThresholdDb",
-                                      DoubleValue(sinrThreshold),
-                                      "HysteresisDb",
-                                      DoubleValue(hysteresisDb),
+    oranHelper->SetDefaultLogicModule("ns3::OranLmNr2NrRsrpSinrOnnxHandover",
+                                      "OnnxModelPath",
+                                      StringValue(onnxModelPath),
                                       "ProcessingDelayRv",
                                       StringValue(lmDelayRv));
 
@@ -421,7 +376,6 @@ main(int argc, char* argv[])
         sinrReporter->SetAttribute("Trigger",
                                    StringValue("ns3::OranReportTriggerPeriodic"));
 
-        // Connect NrUePhy traces -> O-RAN reporters
         for (uint32_t d = 0; d < ueNodes.Get(idx)->GetNDevices(); d++)
         {
             Ptr<NrUeNetDevice> nrUeDev =
@@ -478,7 +432,6 @@ main(int argc, char* argv[])
                                                       MakeCallback(&QueryRcSink));
     }
 
-    // --- Activation sequence ---
     Simulator::Schedule(Seconds(1),
                         &OranHelper::ActivateAndStartNearRtRic,
                         oranHelper,
@@ -492,17 +445,15 @@ main(int argc, char* argv[])
                         oranHelper,
                         e2TermsUes);
 
-    // --- Handover traces ---
     Config::Connect("/NodeList/*/DeviceList/*/NrUeRrc/HandoverEndOk",
                     MakeCallback(&NotifyHandoverEndOk));
     Config::Connect("/NodeList/*/DeviceList/*/NrUeRrc/HandoverStart",
                     MakeCallback(&NotifyHandoverStart));
 
-    // --- Run ---
     Simulator::Stop(simTime);
     Simulator::Run();
 
-    std::cout << "\n=== Simulation complete ===" << std::endl;
+    std::cout << "\n=== Simulation complete (ONNX LM) ===" << std::endl;
     std::cout << "SQLite DB:   " << dbFileName << std::endl;
 
     Simulator::Destroy();
