@@ -49,11 +49,11 @@ smote_testing = SMOTE(random_state=42, k_neighbors=1)
 X_train, Y_train = smote_training.fit_resample(X_train, Y_train)
 X_test, Y_test = smote_testing.fit_resample(X_test, Y_test)
 
-X_train["rsrp_diff"] = abs(X_train["rsrp_serving_dbm"] - X_train["rsrp_neighbor_286_dbm"])
+X_train["rsrp_diff"] = X_train["rsrp_serving_dbm"] - X_train["rsrp_neighbor_286_dbm"]
 
 X_train.drop(columns=["rsrp_serving_dbm", "rsrp_neighbor_286_dbm"], inplace=True)
 
-X_test["rsrp_diff"] = abs(X_test["rsrp_serving_dbm"] - X_test["rsrp_neighbor_286_dbm"])
+X_test["rsrp_diff"] = X_test["rsrp_serving_dbm"] - X_test["rsrp_neighbor_286_dbm"]
 
 X_test.drop(columns=["rsrp_serving_dbm", "rsrp_neighbor_286_dbm"], inplace=True)
 

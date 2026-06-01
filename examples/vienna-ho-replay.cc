@@ -227,6 +227,9 @@ main(int argc, char* argv[])
     cmd.AddValue("sim-time", "Total simulation time (s)", simTimeSec);
     cmd.Parse(argc, argv);
 
+    RngSeedManager::SetSeed(1);                                              
+    RngSeedManager::SetRun(1); 
+
     Time simTime = Seconds(simTimeSec);
     Time lmQueryInterval = Seconds(lmQueryIntervalSec);
     Time metricsInterval = Seconds(metricsIntervalSec);

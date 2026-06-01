@@ -250,8 +250,12 @@ OranLmNr2NrRsrpSinrOnnxHandover::GetHandoverCommands(
         }
 
         // Compute input features: [sinr_serving_db, rsrp_diff]
+        // rsrp_diff is signed (serving - neighbor): negative when the neighbor is
+        // stronger. The sign carries the handover direction, so it must NOT be
+        // taken as an absolute value, and must match the training convention in
+        // examples/nr_rsrp_sinr_logistic.py.
         float sinrFeature = static_cast<float>(sinrDb);
-        float rsrpDiff = static_cast<float>(std::abs(servingRsrp - bestNeighborRsrp));
+        float rsrpDiff = static_cast<float>(servingRsrp - bestNeighborRsrp);
         std::vector<float> inputv = {sinrFeature, rsrpDiff};
 
         LogLogicToRepository("UE RNTI=" + std::to_string(ueInfo.rnti) +
