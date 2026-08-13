@@ -601,6 +601,71 @@ OranDataRepositorySqlite::SaveNrUeSinr(uint64_t e2NodeId,
     }
 }
 
+void
+OranDataRepositorySqlite::SaveNrGnbMeasReport(uint64_t e2NodeId,
+                                              Time t,
+                                              uint64_t imsi,
+                                              uint16_t rnti,
+                                              uint8_t measId,
+                                              uint8_t eventId,
+                                              uint16_t cellId,
+                                              uint8_t rsrpResult,
+                                              uint8_t rsrqResult,
+                                              bool haveRsrpResult,
+                                              bool haveRsrqResult,
+                                              bool isServingCell)
+{
+    NS_LOG_FUNCTION(this << e2NodeId << t << imsi << +rnti << +measId << +eventId << +cellId
+                         << +rsrpResult << +rsrqResult << haveRsrpResult << haveRsrqResult
+                         << isServingCell);
+
+    if (m_active)
+    {
+        if (IsNodeRegistered(e2NodeId))
+        {
+            int rc;
+            sqlite3_stmt* stmt = nullptr;
+
+            sqlite3_prepare_v2(m_db,
+                               m_queryStmtsStrings[INSERT_NR_GNB_MEAS_REPORT].c_str(),
+                               -1,
+                               &stmt,
+                               0);
+
+            sqlite3_bind_int64(stmt, 1, e2NodeId);
+            sqlite3_bind_int64(stmt, 2, t.GetTimeStep());
+            sqlite3_bind_int64(stmt, 3, imsi);
+            sqlite3_bind_int(stmt, 4, rnti);
+            sqlite3_bind_int(stmt, 5, measId);
+            sqlite3_bind_int(stmt, 6, eventId);
+            sqlite3_bind_int(stmt, 7, cellId);
+            sqlite3_bind_int(stmt, 8, rsrpResult);
+            sqlite3_bind_int(stmt, 9, rsrqResult);
+            sqlite3_bind_int(stmt, 10, haveRsrpResult);
+            sqlite3_bind_int(stmt, 11, haveRsrqResult);
+            sqlite3_bind_int(stmt, 12, isServingCell);
+
+            rc = sqlite3_step(stmt);
+
+            CheckQueryReturnCode(stmt,
+                                 rc,
+                                 FormatBoundArgsList(e2NodeId,
+                                                     t.GetTimeStep(),
+                                                     imsi,
+                                                     rnti,
+                                                     +measId,
+                                                     +eventId,
+                                                     cellId,
+                                                     +rsrpResult,
+                                                     +rsrqResult,
+                                                     haveRsrpResult,
+                                                     haveRsrqResult,
+                                                     isServingCell));
+            sqlite3_finalize(stmt);
+        }
+    }
+}
+
 std::map<Time, Vector>
 OranDataRepositorySqlite::GetNodePositions(uint64_t e2NodeId,
                                            Time fromTime,
@@ -1276,6 +1341,68 @@ OranDataRepositorySqlite::GetNrUeSinr(uint64_t e2NodeId)
     return retVal;
 }
 
+std::vector<std::tuple<Time, uint16_t, uint16_t, uint8_t, uint8_t, bool>>
+OranDataRepositorySqlite::GetNrGnbMeasReport(uint64_t ueE2NodeId,
+                                             uint8_t eventId,
+                                             Time fromTime,
+                                             Time toTime)
+{
+    NS_LOG_FUNCTION(this << ueE2NodeId << +eventId << fromTime << toTime);
+
+    std::vector<std::tuple<Time, uint16_t, uint16_t, uint8_t, uint8_t, bool>> retVal;
+
+    if (m_active)
+    {
+        if (IsNodeRegistered(ueE2NodeId))
+        {
+            int rc;
+            sqlite3_stmt* stmt = nullptr;
+
+            sqlite3_prepare_v2(m_db,
+                               m_queryStmtsStrings[GET_NR_GNB_MEAS_REPORT].c_str(),
+                               -1,
+                               &stmt,
+                               0);
+            // The same four values are bound twice: once for the outer query and
+            // once for the sub-query that finds the most recent report.
+            sqlite3_bind_int64(stmt, 1, ueE2NodeId);
+            sqlite3_bind_int(stmt, 2, eventId);
+            sqlite3_bind_int64(stmt, 3, fromTime.GetTimeStep());
+            sqlite3_bind_int64(stmt, 4, toTime.GetTimeStep());
+            sqlite3_bind_int64(stmt, 5, ueE2NodeId);
+            sqlite3_bind_int(stmt, 6, eventId);
+            sqlite3_bind_int64(stmt, 7, fromTime.GetTimeStep());
+            sqlite3_bind_int64(stmt, 8, toTime.GetTimeStep());
+
+            while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+            {
+                Time t = TimeStep(sqlite3_column_int64(stmt, 0));
+                uint16_t rnti = sqlite3_column_int(stmt, 1);
+                uint16_t cellId = sqlite3_column_int(stmt, 2);
+                uint8_t rsrpResult = sqlite3_column_int(stmt, 3);
+                uint8_t rsrqResult = sqlite3_column_int(stmt, 4);
+                bool isServingCell = sqlite3_column_int(stmt, 5);
+
+                retVal.push_back(
+                    std::make_tuple(t, rnti, cellId, rsrpResult, rsrqResult, isServingCell));
+            }
+
+            CheckQueryReturnCode(stmt,
+                                 rc,
+                                 FormatBoundArgsList(ueE2NodeId,
+                                                     +eventId,
+                                                     fromTime.GetTimeStep(),
+                                                     toTime.GetTimeStep(),
+                                                     ueE2NodeId,
+                                                     +eventId,
+                                                     fromTime.GetTimeStep(),
+                                                     toTime.GetTimeStep()));
+            sqlite3_finalize(stmt);
+        }
+    }
+    return retVal;
+}
+
 void
 OranDataRepositorySqlite::LogCommandE2Terminator(Ptr<OranCommand> cmd)
 {
@@ -1534,6 +1661,9 @@ OranDataRepositorySqlite::InitDb()
     RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_CELL_CELLID]);
     RunCreateStatement(m_createStmtsStrings[INDEX_NR_UE_SINR_NODEID]);
 
+    RunCreateStatement(m_createStmtsStrings[TABLE_NR_GNB_MEAS_REPORT]);
+    RunCreateStatement(m_createStmtsStrings[INDEX_NR_GNB_MEAS_REPORT]);
+
     RunCreateStatement(m_createStmtsStrings[TABLE_APPLOSS_COMMAND]);
 
     // E2 Terminator Commands
@@ -1704,6 +1834,33 @@ OranDataRepositorySqlite::InitStatements()
     m_createStmtsStrings[INDEX_NR_UE_SINR_NODEID] =
         "CREATE INDEX IF NOT EXISTS "
         "idx_nruesinr_nodeid ON nruesinr(nodeid, simulationtime);";
+
+    // The RSRP and RSRQ are stored in the quantized ranges of the RRC
+    // measurement report (Table 10.1.6.1-1 of 3GPP TS 38.133), not in dBm or dB.
+    // The subject UE is identified by IMSI rather than by its E2 Node ID because
+    // the report is generated by the gNB, which may receive a Measurement Report
+    // from a UE that has not registered with the RIC yet. The IMSI is resolved to
+    // an E2 Node ID when the entries are read back.
+    m_createStmtsStrings[TABLE_NR_GNB_MEAS_REPORT] =
+        "CREATE TABLE IF NOT EXISTS nrgnbmeasreport ("
+        "entryid        INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, "
+        "nodeid         INTEGER                           NOT NULL, "
+        "simulationtime INTEGER                           NOT NULL, "
+        "imsi           INTEGER                           NOT NULL, "
+        "rnti           INTEGER                           NOT NULL, "
+        "measid         INTEGER                           NOT NULL, "
+        "eventid        INTEGER                           NOT NULL, "
+        "cellid         INTEGER                           NOT NULL, "
+        "rsrpresult     INTEGER                           NOT NULL, "
+        "rsrqresult     INTEGER                           NOT NULL, "
+        "haversrp       BOOLEAN                           NOT NULL, "
+        "haversrq       BOOLEAN                           NOT NULL, "
+        "serving        BOOLEAN                           NOT NULL, "
+        "FOREIGN KEY(nodeid) REFERENCES nrgnb(nodeid));";
+
+    m_createStmtsStrings[INDEX_NR_GNB_MEAS_REPORT] =
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_nrgnbmeasreport_imsi ON nrgnbmeasreport(imsi, eventid, simulationtime);";
 
     m_createStmtsStrings[TABLE_NODE] =
         "CREATE TABLE IF NOT EXISTS node ("
@@ -1911,6 +2068,33 @@ OranDataRepositorySqlite::InitStatements()
     m_queryStmtsStrings[INSERT_NR_UE_SINR] =
         "INSERT INTO nruesinr "
         "(nodeid, simulationtime, cellid, rnti, sinr, bwpid) VALUES (?, ?, ?, ?, ?, ?);";
+
+    // Returns the entries of the single most recent Measurement Report that was
+    // triggered by the given event for the given UE within the given interval.
+    // The UE is looked up by E2 Node ID, which is resolved to the IMSI that the
+    // entries are stored against through the table of registered NR UEs.
+    m_queryStmtsStrings[GET_NR_GNB_MEAS_REPORT] =
+        "SELECT r.simulationtime, r.rnti, r.cellid, r.rsrpresult, r.rsrqresult, r.serving "
+        "FROM nrgnbmeasreport r "
+        "INNER JOIN nrue u ON u.imsi = r.imsi "
+        "WHERE u.nodeid = ? "
+        "AND r.eventid = ? "
+        "AND r.simulationtime >= ? "
+        "AND r.simulationtime <= ? "
+        "AND r.simulationtime = ("
+        "SELECT MAX(r2.simulationtime) "
+        "FROM nrgnbmeasreport r2 "
+        "INNER JOIN nrue u2 ON u2.imsi = r2.imsi "
+        "WHERE u2.nodeid = ? "
+        "AND r2.eventid = ? "
+        "AND r2.simulationtime >= ? "
+        "AND r2.simulationtime <= ?"
+        ");";
+
+    m_queryStmtsStrings[INSERT_NR_GNB_MEAS_REPORT] =
+        "INSERT INTO nrgnbmeasreport "
+        "(nodeid, simulationtime, imsi, rnti, measid, eventid, cellid, rsrpresult, rsrqresult, "
+        "haversrp, haversrq, serving) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     m_queryStmtsStrings[LOG_CMM_ACTION] =
         "INSERT INTO cmmaction "

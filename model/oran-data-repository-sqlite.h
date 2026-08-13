@@ -118,6 +118,18 @@ class OranDataRepositorySqlite : public OranDataRepository
                       uint16_t rnti,
                       double sinr,
                       uint16_t bwpId) override;
+    void SaveNrGnbMeasReport(uint64_t e2NodeId,
+                             Time t,
+                             uint64_t imsi,
+                             uint16_t rnti,
+                             uint8_t measId,
+                             uint8_t eventId,
+                             uint16_t cellId,
+                             uint8_t rsrpResult,
+                             uint8_t rsrqResult,
+                             bool haveRsrpResult,
+                             bool haveRsrqResult,
+                             bool isServingCell) override;
 
     std::map<Time, Vector> GetNodePositions(uint64_t e2NodeId,
                                             Time fromTime,
@@ -145,6 +157,11 @@ class OranDataRepositorySqlite : public OranDataRepository
         uint64_t e2NodeId) override;
     std::vector<std::tuple<uint16_t, uint16_t, double, uint16_t>> GetNrUeSinr(
         uint64_t e2NodeId) override;
+    std::vector<std::tuple<Time, uint16_t, uint16_t, uint8_t, uint8_t, bool>> GetNrGnbMeasReport(
+        uint64_t ueE2NodeId,
+        uint8_t eventId,
+        Time fromTime,
+        Time toTime) override;
 
     void LogCommandE2Terminator(Ptr<OranCommand> cmd) override;
     void LogCommandLm(std::string lm, Ptr<OranCommand> cmd) override;
@@ -201,6 +218,8 @@ class OranDataRepositorySqlite : public OranDataRepository
         INSERT_NR_UE_RSRP_RSRQ,            //!< Add NR UE RSRP and RSRQ
         GET_NR_UE_SINR,                     //!< Get the NR UE SINR measurements
         INSERT_NR_UE_SINR,                  //!< Add NR UE SINR measurement
+        GET_NR_GNB_MEAS_REPORT,             //!< Get an NR RRC Measurement Report
+        INSERT_NR_GNB_MEAS_REPORT,          //!< Add an NR RRC Measurement Report entry
         LOG_CMM_ACTION,                    //!< Log a CM module action
         LOG_E2TERMINATOR_COMMAND,          //!< Log an E2 terminator command from the RIC
         LOG_LM_ACTION,                     //!< Log an LM action
@@ -243,6 +262,9 @@ class OranDataRepositorySqlite : public OranDataRepository
         TABLE_NR_UE_RSRP_RSRQ,    //!< Table with NR UE RSRP and RSRQ Information
         TABLE_NR_UE_SINR,         //!< Table with NR UE SINR Information
         INDEX_NR_UE_SINR_NODEID,  //!< Index for NR UE SINR based on E2 Node ID and time
+        TABLE_NR_GNB_MEAS_REPORT, //!< Table with NR RRC Measurement Report Information
+        INDEX_NR_GNB_MEAS_REPORT, //!< Index for NR RRC Measurement Reports based on IMSI, event,
+                                  //!< and time
         TABLE_NODE,               //!< Table with E2 Node Information
         TABLE_NODE_LOCATION,      //!< Table with Node Locations
         TABLE_NODE_REGISTRATION,  //!< Table with Node Registrations

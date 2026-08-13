@@ -269,6 +269,43 @@ class OranDataRepository : public Object
                               uint16_t rnti,
                               double sinr,
                               uint16_t bwpId) = 0;
+    /**
+     * Store one measured cell of a 3GPP RRC Measurement Report that an NR gNB
+     * received from a UE.
+     *
+     * A Measurement Report is stored as one entry for the primary cell plus one
+     * entry per neighbour cell, all of them sharing the reporting gNB, time,
+     * IMSI, RNTI, measurement ID, and event ID.
+     *
+     * The RSRP and RSRQ are stored in the quantized ranges of the RRC
+     * measurement report (see Table 10.1.6.1-1 of 3GPP TS 38.133), and not in
+     * dBm or dB.
+     *
+     * @param e2NodeId The E2 Node ID of the reporting gNB.
+     * @param t The time at which the Measurement Report was received.
+     * @param imsi The IMSI of the UE that sent the Measurement Report.
+     * @param rnti The RNTI of the UE that sent the Measurement Report.
+     * @param measId The measurement ID of the reporting configuration.
+     * @param eventId The measurement reporting event that triggered the report.
+     * @param cellId The ID of the measured cell.
+     * @param rsrpResult The quantized RSRP of the measured cell.
+     * @param rsrqResult The quantized RSRQ of the measured cell.
+     * @param haveRsrpResult Indicates if the RSRP is valid.
+     * @param haveRsrqResult Indicates if the RSRQ is valid.
+     * @param isServingCell Indicates if the measured cell is the serving cell.
+     */
+    virtual void SaveNrGnbMeasReport(uint64_t e2NodeId,
+                                     Time t,
+                                     uint64_t imsi,
+                                     uint16_t rnti,
+                                     uint8_t measId,
+                                     uint8_t eventId,
+                                     uint16_t cellId,
+                                     uint8_t rsrpResult,
+                                     uint8_t rsrqResult,
+                                     bool haveRsrpResult,
+                                     bool haveRsrqResult,
+                                     bool isServingCell) = 0;
 
     /* Data Access API */
     /**
@@ -428,6 +465,31 @@ class OranDataRepository : public Object
      */
     virtual std::vector<std::tuple<uint16_t, uint16_t, double, uint16_t>>
     GetNrUeSinr(uint64_t e2NodeId) = 0;
+    /**
+     * Gets the measured cells of the most recent 3GPP RRC Measurement Report
+     * that was triggered by a given event for a given UE, within a time
+     * interval.
+     *
+     * The Measurement Reports are stored against the gNB that received them,
+     * but are looked up here by the E2 Node ID of the UE that sent them, since
+     * that is how a Logic Module identifies a UE.
+     *
+     * Only the entries of a single Measurement Report are returned, so all of
+     * the entries share the same time. Bounding the interval is how a Logic
+     * Module avoids acting on a Measurement Report that is too old to still
+     * describe the radio conditions of the UE.
+     *
+     * @param ueE2NodeId The E2 Node ID of the UE that sent the Measurement Report.
+     * @param eventId The measurement reporting event of interest.
+     * @param fromTime Starting time of the interval to consider.
+     * @param toTime End time of the interval to consider.
+     *
+     * @return A collection of time, RNTI, cell ID, quantized RSRP, quantized
+     *         RSRQ, and is serving cell tuples. Empty if no Measurement Report
+     *         triggered by that event was received in the interval.
+     */
+    virtual std::vector<std::tuple<Time, uint16_t, uint16_t, uint8_t, uint8_t, bool>>
+    GetNrGnbMeasReport(uint64_t ueE2NodeId, uint8_t eventId, Time fromTime, Time toTime) = 0;
 
     /* Logging API */
     /**
