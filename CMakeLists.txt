@@ -123,6 +123,7 @@ build_lib(
     model/oran-lm-nr-2-nr-distance-handover.cc
     model/oran-lm-nr-2-nr-rsrp-handover.cc
     model/oran-lm-nr-2-nr-rsrp-sinr-handover.cc
+    model/oran-lm-nr-2-nr-a2-a4-rsrp-handover.cc
     model/oran-cmm.cc
     model/oran-cmm-handover.cc
     model/oran-cmm-noop.cc
@@ -181,6 +182,7 @@ build_lib(
     model/oran-lm-nr-2-nr-distance-handover.h
     model/oran-lm-nr-2-nr-rsrp-handover.h
     model/oran-lm-nr-2-nr-rsrp-sinr-handover.h
+    model/oran-lm-nr-2-nr-a2-a4-rsrp-handover.h
     model/oran-cmm.h
     model/oran-cmm-handover.h
     model/oran-cmm-noop.h

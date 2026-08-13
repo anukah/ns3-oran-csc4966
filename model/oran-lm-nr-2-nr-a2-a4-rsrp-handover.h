@@ -1,0 +1,148 @@
+/**
+ * NIST-developed software is provided by NIST as a public service. You may
+ * use, copy and distribute copies of the software in any medium, provided that
+ * you keep intact this entire notice. You may improve, modify and create
+ * derivative works of the software or any portion of the software, and you may
+ * copy and distribute such modifications or works. Modified works should carry
+ * a notice stating that you changed the software and should note the date and
+ * nature of any such change. Please explicitly acknowledge the National
+ * Institute of Standards and Technology as the source of the software.
+ *
+ * NIST-developed software is expressly provided "AS IS." NIST MAKES NO
+ * WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT OR ARISING BY OPERATION OF
+ * LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT AND DATA ACCURACY. NIST
+ * NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE
+ * UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST
+ * DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE
+ * SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE
+ * CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+ *
+ * You are solely responsible for determining the appropriateness of using and
+ * distributing the software and you assume all risks associated with its use,
+ * including but not limited to the risks and costs of program errors,
+ * compliance with applicable laws, damage to or loss of data, programs or
+ * equipment, and the unavailability or interruption of operation. This
+ * software is not intended to be used in any situation where a failure could
+ * cause risk of injury or damage to property. The software developed by NIST
+ * employees is not subject to copyright protection within the United States.
+ */
+
+#ifndef ORAN_LM_NR_2_NR_A2_A4_RSRP_HANDOVER_H
+#define ORAN_LM_NR_2_NR_A2_A4_RSRP_HANDOVER_H
+
+#include "oran-data-repository.h"
+#include "oran-lm.h"
+
+#include "ns3/nstime.h"
+
+#include <cstdint>
+#include <map>
+#include <vector>
+
+namespace ns3
+{
+
+/**
+ * @ingroup oran
+ *
+ * Logic Module for the Near-RT RIC that reproduces, at the RIC, the handover
+ * decision of the `ns3::NrA2A4RsrpHandoverAlgorithm` gNB handover algorithm.
+ *
+ * The algorithm has two conditions. The first is that the RSRP of the serving
+ * cell has become worse than a threshold, which is Event A2. The second is that
+ * the RSRP of the best neighbour cell exceeds the RSRP of the serving cell by at
+ * least an offset, where the neighbour cells and their RSRP are learned from
+ * Event A4 reports. When both conditions hold, a handover to the best neighbour
+ * cell is issued.
+ *
+ * Unlike the Logic Modules that work from UE PHY measurements, this one consumes
+ * the 3GPP RRC Measurement Reports that `OranReporterNrGnbMeasReport` captures
+ * at the gNB. Those measurements have already been through layer 3 filtering,
+ * the event entry and leaving conditions, and the time-to-trigger in the UE RRC,
+ * and are quantized as the RRC reports them. This Logic Module therefore does
+ * not evaluate any measurement condition itself: it applies the same
+ * decision that `NrA2A4RsrpHandoverAlgorithm::EvaluateHandover` applies to the
+ * same inputs.
+ *
+ * One consequence is that there is no `ServingCellThreshold` attribute here. The
+ * A2 threshold is part of the reporting configuration that the scenario installs
+ * on the gNB with `NrGnbRrc::AddUeMeasReportConfig`, and it is the UE RRC that
+ * evaluates it. The arrival of an Event A2 report is itself the statement that
+ * the first condition of the algorithm holds.
+ *
+ * A second consequence is that, unlike the gNB algorithm, the neighbour cell
+ * measurements read here are timestamped, so a bound can be placed on how old a
+ * measurement may be before it is ignored. The gNB algorithm keeps its neighbour
+ * measurement table for the whole simulation and never ages it, so it can act on
+ * a neighbour measurement that no longer describes the radio conditions of the
+ * UE. See the `MaxReportAge` attribute.
+ */
+class OranLmNr2NrA2A4RsrpHandover : public OranLm
+{
+  public:
+    /**
+     * Gets the TypeId of the OranLmNr2NrA2A4RsrpHandover class.
+     *
+     * @return The TypeId.
+     */
+    static TypeId GetTypeId();
+    /**
+     * Constructor of the OranLmNr2NrA2A4RsrpHandover class.
+     */
+    OranLmNr2NrA2A4RsrpHandover();
+    /**
+     * Destructor of the OranLmNr2NrA2A4RsrpHandover class.
+     */
+    ~OranLmNr2NrA2A4RsrpHandover() override;
+    /**
+     * Runs the logic specific for this Logic Module. For each NR UE that has
+     * recently reported Event A2, this finds the best neighbour cell reported
+     * through Event A4, and generates a handover Command if that cell exceeds
+     * the serving cell by at least the configured offset.
+     *
+     * @return A vector with the handover commands generated by this Logic Module.
+     */
+    std::vector<Ptr<OranCommand>> Run() override;
+
+  private:
+    /**
+     * Builds a map from cell ID to the E2 Node ID of the gNB that serves it.
+     *
+     * @param data The data repository.
+     *
+     * @return The map of cell IDs to gNB E2 Node IDs.
+     */
+    std::map<uint16_t, uint64_t> GetGnbCellIds(Ptr<OranDataRepository> data) const;
+    /**
+     * Evaluates the two conditions of the algorithm for a single UE and, if both
+     * hold, generates the handover Command.
+     *
+     * @param data The data repository.
+     * @param ueE2NodeId The E2 Node ID of the UE.
+     * @param gnbCellIds The map of cell IDs to gNB E2 Node IDs.
+     *
+     * @return The handover Command, or nullptr if no handover is needed.
+     */
+    Ptr<OranCommand> EvaluateHandover(Ptr<OranDataRepository> data,
+                                      uint64_t ueE2NodeId,
+                                      const std::map<uint16_t, uint64_t>& gnbCellIds) const;
+
+    /**
+     * The `NeighbourCellOffset` attribute. The minimum offset between the
+     * serving cell and the best neighbour cell needed to trigger a handover,
+     * expressed in the quantized range of [0..127] of Table 10.1.6.1-1 of
+     * 3GPP TS 38.133.
+     */
+    uint8_t m_neighbourCellOffset;
+    /**
+     * The `MaxReportAge` attribute. Measurement Reports older than this are
+     * ignored.
+     */
+    Time m_maxReportAge;
+
+}; // class OranLmNr2NrA2A4RsrpHandover
+
+} // namespace ns3
+
+#endif // ORAN_LM_NR_2_NR_A2_A4_RSRP_HANDOVER_H
