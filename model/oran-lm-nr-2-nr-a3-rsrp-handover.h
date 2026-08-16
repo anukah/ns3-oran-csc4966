@@ -1,0 +1,141 @@
+/**
+ * NIST-developed software is provided by NIST as a public service. You may
+ * use, copy and distribute copies of the software in any medium, provided that
+ * you keep intact this entire notice. You may improve, modify and create
+ * derivative works of the software or any portion of the software, and you may
+ * copy and distribute such modifications or works. Modified works should carry
+ * a notice stating that you changed the software and should note the date and
+ * nature of any such change. Please explicitly acknowledge the National
+ * Institute of Standards and Technology as the source of the software.
+ *
+ * NIST-developed software is expressly provided "AS IS." NIST MAKES NO
+ * WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT OR ARISING BY OPERATION OF
+ * LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT AND DATA ACCURACY. NIST
+ * NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE
+ * UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST
+ * DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE
+ * SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE
+ * CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
+ *
+ * You are solely responsible for determining the appropriateness of using and
+ * distributing the software and you assume all risks associated with its use,
+ * including but not limited to the risks and costs of program errors,
+ * compliance with applicable laws, damage to or loss of data, programs or
+ * equipment, and the unavailability or interruption of operation. This
+ * software is not intended to be used in any situation where a failure could
+ * cause risk of injury or damage to property. The software developed by NIST
+ * employees is not subject to copyright protection within the United States.
+ */
+
+#ifndef ORAN_LM_NR_2_NR_A3_RSRP_HANDOVER_H
+#define ORAN_LM_NR_2_NR_A3_RSRP_HANDOVER_H
+
+#include "oran-data-repository.h"
+#include "oran-lm.h"
+
+#include "ns3/nstime.h"
+
+#include <cstdint>
+#include <map>
+#include <vector>
+
+namespace ns3
+{
+
+/**
+ * @ingroup oran
+ *
+ * Logic Module for the Near-RT RIC that reproduces, at the RIC, the handover
+ * decision of the `ns3::NrA3RsrpHandoverAlgorithm` gNB handover algorithm.
+ *
+ * The algorithm has a single condition, Event A3: a neighbour cell became
+ * offset better than the primary cell. When it holds, a handover to the
+ * strongest reported neighbour is issued.
+ *
+ * This Logic Module consumes the 3GPP RRC Measurement Reports that
+ * `OranReporterNrGnbMeasReport` captures at the gNB, and evaluates no
+ * measurement condition of its own. In particular it has no `Hysteresis`,
+ * `A3Offset`, or `TimeToTrigger` attribute, because all three belong to the
+ * Event A3 reporting configuration that the scenario installs on the gNB with
+ * `NrGnbRrc::AddUeMeasReportConfig`, and all three are applied by the UE RRC:
+ *
+ * - The A3 entry condition, Mn + Ofn + Ocn - Hys > Mp + Ofp + Ocp + Off, is
+ *   evaluated in `NrUeRrc::MeasurementReportTriggering`.
+ * - The time-to-trigger is enforced there too, by scheduling the report after
+ *   the configured delay and cancelling it if the entry condition breaks first.
+ *
+ * An Event A3 report therefore only exists because the condition held
+ * continuously for the whole time-to-trigger, which is why all this Logic
+ * Module does, exactly as `NrA3RsrpHandoverAlgorithm::DoReportUeMeas` does, is
+ * pick the strongest reported neighbour and issue the handover.
+ *
+ * Note that the UE keeps re-sending the report every reporting interval for as
+ * long as the condition holds, and stops when it clears. Bounding how old a
+ * report may be with the `MaxReportAge` attribute is therefore an implicit
+ * check that the condition still holds, and is the only thing that prevents a
+ * handover being issued on an Event A3 condition that has since cleared. It
+ * should be set a little above the reporting interval of the Event A3
+ * configuration: too short and valid reports are dropped between intervals, too
+ * long and a cleared condition can still trigger a handover.
+ */
+class OranLmNr2NrA3RsrpHandover : public OranLm
+{
+  public:
+    /**
+     * Gets the TypeId of the OranLmNr2NrA3RsrpHandover class.
+     *
+     * @return The TypeId.
+     */
+    static TypeId GetTypeId();
+    /**
+     * Constructor of the OranLmNr2NrA3RsrpHandover class.
+     */
+    OranLmNr2NrA3RsrpHandover();
+    /**
+     * Destructor of the OranLmNr2NrA3RsrpHandover class.
+     */
+    ~OranLmNr2NrA3RsrpHandover() override;
+    /**
+     * Runs the logic specific for this Logic Module. For each NR UE that has
+     * recently reported Event A3, this generates a handover Command towards the
+     * strongest neighbour cell in the report.
+     *
+     * @return A vector with the handover commands generated by this Logic Module.
+     */
+    std::vector<Ptr<OranCommand>> Run() override;
+
+  private:
+    /**
+     * Builds a map from cell ID to the E2 Node ID of the gNB that serves it.
+     *
+     * @param data The data repository.
+     *
+     * @return The map of cell IDs to gNB E2 Node IDs.
+     */
+    std::map<uint16_t, uint64_t> GetGnbCellIds(Ptr<OranDataRepository> data) const;
+    /**
+     * Generates the handover Command for a single UE, if it recently reported
+     * Event A3.
+     *
+     * @param data The data repository.
+     * @param ueE2NodeId The E2 Node ID of the UE.
+     * @param gnbCellIds The map of cell IDs to gNB E2 Node IDs.
+     *
+     * @return The handover Command, or nullptr if no handover is needed.
+     */
+    Ptr<OranCommand> EvaluateHandover(Ptr<OranDataRepository> data,
+                                      uint64_t ueE2NodeId,
+                                      const std::map<uint16_t, uint64_t>& gnbCellIds) const;
+
+    /**
+     * The `MaxReportAge` attribute. Measurement Reports older than this are
+     * ignored.
+     */
+    Time m_maxReportAge;
+
+}; // class OranLmNr2NrA3RsrpHandover
+
+} // namespace ns3
+
+#endif // ORAN_LM_NR_2_NR_A3_RSRP_HANDOVER_H
