@@ -134,6 +134,34 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME oran-nr-2-nr-a3-handover-example
+  SOURCE_FILES oran-nr-2-nr-a3-handover-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libflow-monitor}
+)
+
+build_lib_example(
+  NAME oran-nr-2-nr-a3-handover-3gnb-example
+  SOURCE_FILES oran-nr-2-nr-a3-handover-3gnb-example.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libflow-monitor}
+)
+
+build_lib_example(
   NAME oran-nr-2-nr-rsrp-handover-lm-example
   SOURCE_FILES oran-nr-2-nr-rsrp-handover-lm-example.cc
   LIBRARIES_TO_LINK
