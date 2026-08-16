@@ -948,6 +948,236 @@ class OranTestCaseNrDistanceHandover : public TestCase
 };
 
 /**
+ * Verify the decision logic of OranLmNr2NrA3RsrpHandover, which reproduces the
+ * decision of the ns3::NrA3RsrpHandoverAlgorithm gNB handover algorithm from the
+ * RRC Measurement Reports captured at the gNB.
+ *
+ * The Logic Module evaluates no measurement condition: the A3 entry inequality,
+ * its hysteresis and offset, and the time-to-trigger are all applied by the UE
+ * RRC before the report is sent. The existence of a recent Event A3 report is
+ * therefore the condition, and all the Logic Module does is pick the strongest
+ * reported neighbour.
+ */
+class OranTestCaseNrA3LmDecision : public TestCase
+{
+  public:
+    OranTestCaseNrA3LmDecision()
+        : TestCase("Oran Test Case NR A3 RSRP LM Decision Logic")
+    {
+    }
+
+  private:
+    /**
+     * Register the common topology and the UE cell attachment.
+     *
+     * Topology: gNB1 (nodeId=1, cellId=10), gNB2 (nodeId=2, cellId=20),
+     *           gNB3 (nodeId=3, cellId=30)
+     *           UE (nodeId=4, imsi=100) attached to gNB1 (cellId=10, rnti=5)
+     *
+     * @param ric The Near-RT RIC.
+     * @param t The time to record the entries at.
+     */
+    void SeedTopology(Ptr<OranNearRtRic> ric, Time t)
+    {
+        ric->Data()->RegisterNodeNrGnb(1, 10);
+        ric->Data()->RegisterNodeNrGnb(2, 20);
+        ric->Data()->RegisterNodeNrGnb(3, 30);
+        ric->Data()->RegisterNodeNrUe(4, 100);
+        ric->Data()->SaveNrUeCellInfo(4, 10, 5, t);
+    }
+
+    /**
+     * Record one measured cell of an Event A3 Measurement Report.
+     *
+     * @param ric The Near-RT RIC.
+     * @param t The time of the report.
+     * @param cellId The ID of the measured cell.
+     * @param rsrpResult The quantized RSRP of the measured cell.
+     * @param isServingCell Indicates if this is the primary cell measurement.
+     */
+    void SaveA3Entry(Ptr<OranNearRtRic> ric,
+                     Time t,
+                     uint16_t cellId,
+                     uint8_t rsrpResult,
+                     bool isServingCell)
+    {
+        ric->Data()->SaveNrGnbMeasReport(1,
+                                         t,
+                                         100,
+                                         5,
+                                         1,
+                                         OranReportNrGnbMeasReport::EVENT_A3,
+                                         cellId,
+                                         rsrpResult,
+                                         20,
+                                         true,
+                                         true,
+                                         isServingCell);
+    }
+
+    void DoRun() override
+    {
+        // --- Sub-case 1: no Event A3 report -> no handover ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a3-lm-1.db");
+
+            Ptr<OranLmNr2NrA3RsrpHandover> lm = CreateObject<OranLmNr2NrA3RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1.5)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 1: without an Event A3 report there is no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 2: Event A3 with one neighbour -> handover to it ---
+        // Note that the neighbour RSRP is deliberately lower than the serving
+        // cell RSRP. The Logic Module must still hand over, because the UE RRC
+        // already applied the A3 entry condition, its hysteresis and offset, and
+        // the time-to-trigger before sending the report.
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a3-lm-2.db");
+
+            Ptr<OranLmNr2NrA3RsrpHandover> lm = CreateObject<OranLmNr2NrA3RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1.5)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                SaveA3Entry(ric, Seconds(0.1), 10, 60, true);
+                SaveA3Entry(ric, Seconds(0.1), 20, 55, false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      1,
+                                      "Sub-case 2: should produce exactly 1 HO command");
+
+                Ptr<OranCommandNr2NrHandover> hoCmd =
+                    DynamicCast<OranCommandNr2NrHandover>(cmds.front());
+                NS_TEST_ASSERT_MSG_NE(hoCmd, nullptr, "Command should be OranCommandNr2NrHandover");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetCellId(),
+                                      20,
+                                      "HO should target gNB2 (cellId 20)");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetRnti(), 5, "HO should target RNTI 5");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetE2NodeId(),
+                                      1,
+                                      "HO command should be sent to serving gNB (E2NodeId 1)");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 3: two neighbours -> handover to the stronger one ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a3-lm-3.db");
+
+            Ptr<OranLmNr2NrA3RsrpHandover> lm = CreateObject<OranLmNr2NrA3RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1.5)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                SaveA3Entry(ric, Seconds(0.1), 10, 60, true);
+                SaveA3Entry(ric, Seconds(0.1), 20, 70, false);
+                SaveA3Entry(ric, Seconds(0.1), 30, 85, false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      1,
+                                      "Sub-case 3: should produce exactly 1 HO command");
+
+                Ptr<OranCommandNr2NrHandover> hoCmd =
+                    DynamicCast<OranCommandNr2NrHandover>(cmds.front());
+                NS_TEST_ASSERT_MSG_NE(hoCmd, nullptr, "Command should be OranCommandNr2NrHandover");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetCellId(),
+                                      30,
+                                      "HO should target the strongest neighbour (cellId 30)");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 4: the report is older than MaxReportAge -> no HO ---
+        // The UE re-sends the Event A3 report for as long as the condition holds
+        // and stops when it clears, so an aged out report means the condition is
+        // no longer known to hold.
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a3-lm-4.db");
+
+            Ptr<OranLmNr2NrA3RsrpHandover> lm = CreateObject<OranLmNr2NrA3RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1.5)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            // The same measurements as sub-case 2, which did trigger a handover.
+            Simulator::Schedule(Seconds(0.1), [this, ric]() {
+                SeedTopology(ric, Seconds(0.1));
+                SaveA3Entry(ric, Seconds(0.1), 10, 60, true);
+                SaveA3Entry(ric, Seconds(0.1), 20, 55, false);
+            });
+
+            Simulator::Schedule(Seconds(3.0), [this, lm]() {
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 4: report older than MaxReportAge gives no HO");
+            });
+
+            Simulator::Stop(Seconds(3.1));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 5: the neighbour has no registered gNB -> no HO ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a3-lm-5.db");
+
+            Ptr<OranLmNr2NrA3RsrpHandover> lm = CreateObject<OranLmNr2NrA3RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1.5)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                SaveA3Entry(ric, Seconds(0.1), 10, 60, true);
+                // CellId 99 has no gNB registered with the RIC.
+                SaveA3Entry(ric, Seconds(0.1), 99, 90, false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 5: unregistered neighbour is not a valid target");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+    }
+};
+
+/**
  * @ingroup oran
  *
  * Test suite for the O-RAN module
@@ -976,6 +1206,7 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrRsrpLmMissingGnb, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceLmMissingGnb, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrA3LmDecision, Duration::QUICK);
 }
 
 static OranTestSuite soranTestSuite;
