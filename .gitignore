@@ -38,3 +38,7 @@ build/
 /.project
 
 version.cache
+
+oran-repository.db
+.DS_Store
+*.csv
