@@ -134,8 +134,8 @@ build_lib_example(
 )
 
 build_lib_example(
-  NAME oran-nr-2-nr-a3-handover-example
-  SOURCE_FILES oran-nr-2-nr-a3-handover-example.cc
+  NAME oran-nr-2-nr-a2-a4-handover-example
+  SOURCE_FILES oran-nr-2-nr-a2-a4-handover-example.cc
   LIBRARIES_TO_LINK
     ${liboran}
     ${libnetwork}
@@ -148,8 +148,8 @@ build_lib_example(
 )
 
 build_lib_example(
-  NAME oran-nr-2-nr-a3-handover-3gnb-example
-  SOURCE_FILES oran-nr-2-nr-a3-handover-3gnb-example.cc
+  NAME oran-nr-2-nr-a3-handover-example
+  SOURCE_FILES oran-nr-2-nr-a3-handover-example.cc
   LIBRARIES_TO_LINK
     ${liboran}
     ${libnetwork}

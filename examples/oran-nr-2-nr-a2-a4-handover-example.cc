@@ -38,7 +38,6 @@
 #include "ns3/nr-channel-helper.h"
 #include "ns3/nr-common.h"
 #include "ns3/nr-gnb-net-device.h"
-#include "ns3/nr-gnb-phy.h"
 #include "ns3/nr-gnb-rrc.h"
 #include "ns3/nr-helper.h"
 #include "ns3/nr-point-to-point-epc-helper.h"
@@ -54,61 +53,57 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("OranNr2NrA3Handover3GnbExample");
+NS_LOG_COMPONENT_DEFINE("OranNr2NrA2A4HandoverExample");
 
 /**
- * Three gNB variant of oran-nr-2-nr-a3-handover-example, in which one cell is
- * given a lower transmit power than the other two.
+ * Usage example of the O-RAN NR bridge that reproduces, at the Near-RT RIC, the
+ * decision of the ns3::NrA2A4RsrpHandoverAlgorithm gNB handover algorithm.
  *
- * The two gNB example cannot exercise the one decision that
- * OranLmNr2NrA3RsrpHandover actually makes. With two cells there is only ever
- * one neighbour in an Event A3 Measurement Report, so "hand over to the
- * strongest reported neighbour" and "hand over to the only reported neighbour"
- * are the same statement, and a Logic Module that picked the first neighbour, or
- * the nearest one, would score identically.
+ * The scenario is the same as oran-nr-2-nr-distance-handover-example: a single
+ * NR UE moving back and forth between two NR gNBs, with the gNB-side automatic
+ * handover algorithm disabled (NrNoOpHandoverAlgorithm) so that all handovers
+ * come from the RIC.
  *
- * Three collinear gNBs at x = 0, d, and 2d fix the first half of that: around
- * the middle of the row the UE measures two neighbours at once. On their own
- * though, three equal cells still make the strongest neighbour the nearest one,
- * so the choice remains degenerate.
- *
- * Lowering the transmit power of the middle cell breaks the tie. With the outer
- * gNBs at `--gnbTxPower` and the middle one at `--weakGnbTxPower`, there is a
- * stretch either side of x = d where the middle cell is the closest cell but not
- * the strongest one, so an Event A3 report lists a near weak neighbour and a far
- * strong neighbour with a wide RSRP gap between them. Picking the strongest is
- * then a decision with a right and a wrong answer, and the `oran` and `gnb`
- * modes agreeing on it means more than it did with two cells.
- *
- * Under Friis, cell i beats cell j where Pi - 20*log10(di) > Pj - 20*log10(dj).
- * For the defaults (30 dBm outer, 18 dBm middle, d = 200 m) the middle cell is
- * the strongest only over roughly x = 160 m to x = 240 m, while it is the
- * nearest cell over x = 100 m to x = 300 m. The two stretches either side, about
- * 60 m wide each, are where nearest and strongest disagree. Raising
- * `--weakGnbTxPower` towards `--gnbTxPower` shrinks them to nothing and recovers
- * the degenerate case; lowering it far enough removes the middle cell from
- * service altogether, and the UE hands over from the first cell to the third
- * directly, past a neighbour it can hear clearly and must not choose.
- *
- * Everything else follows the two gNB example: the gNBs report the 3GPP RRC
- * Measurement Reports they receive to the RIC, the Event A3 condition and its
- * hysteresis and time-to-trigger are evaluated entirely in the UE RRC, and
- * `--handoverMode` selects between the RIC Logic Module (`oran`), the stock
- * ns3::NrA3RsrpHandoverAlgorithm at the gNB (`gnb`), and no handovers at all
- * (`none`) over an identical radio scenario.
+ * What differs is where the handover decision comes from. Instead of comparing
+ * positions, the gNBs report to the RIC the 3GPP RRC Measurement Reports that
+ * they receive from the UE, and OranLmNr2NrA2A4RsrpHandover applies the
+ * two-condition A2/A4 decision to them. Since the Event A2 and Event A4
+ * conditions, their thresholds, the layer 3 filtering, and the time-to-trigger
+ * are all evaluated in the UE RRC, the Logic Module does not re-evaluate any
+ * measurement condition: the arrival of an Event A2 report is the first
+ * condition of the algorithm, and the Event A4 reports supply the neighbour cell
+ * measurements for the second.
  *
  * Because the no-op handover algorithm registers no reporting configuration, the
- * Event A3 configuration is installed here explicitly, mirroring what
- * NrA3RsrpHandoverAlgorithm::DoInitialize installs. This must happen before the
- * simulation starts, since NrGnbRrc::AddUeMeasReportConfig aborts if it is
- * called after time 0.
+ * Event A2 and Event A4 configurations are installed here explicitly. This must
+ * happen before the simulation starts, since NrGnbRrc::AddUeMeasReportConfig
+ * aborts if it is called after time 0.
  *
- * With `--printMeasReports`, every Measurement Report received is printed with
- * the quantized RSRP of the serving and every neighbour cell and its value in
- * dBm, which is the direct way to read off the neighbour ordering that the
- * Logic Module sees.
+ * The `--handoverMode` argument selects where the decision is taken, so that the
+ * two can be compared over the identical scenario:
+ *
+ * - `oran`: the gNBs run NrNoOpHandoverAlgorithm and the RIC decides, as
+ *   described above. This is the default.
+ * - `gnb`: the gNBs run the stock ns3::NrA2A4RsrpHandoverAlgorithm with
+ *   `ServingCellThreshold` set to `--a2Threshold` and `NeighbourCellOffset` to
+ *   `--neighbourCellOffset`, and no RIC is instantiated. The algorithm installs
+ *   the same Event A2 (MS240) and Event A4 (threshold 0, MS480) reporting
+ *   configurations that the `oran` mode installs by hand, so both modes see the
+ *   same Measurement Reports and differ only in where and when they are acted
+ *   upon.
+ * - `none`: no handover algorithm at all, as a baseline that shows what the
+ *   flow looks like when the UE stays on its initial cell for the whole run.
+ *
+ * A FlowMonitor is installed in every mode and a per-flow summary is printed at
+ * the end, along with the number of completed handovers, which is what makes the
+ * modes comparable.
+ *
+ * With `--printMeasReports`, every Measurement Report received is printed,
+ * including the quantized RSRP of the serving and neighbour cells and its value
+ * in dBm. If the run produces no Event A2 reports at all, the serving cell never
+ * got worse than the configured threshold: read the printed serving RSRP around
+ * the middle of the UE's travel and pass a --a2Threshold below it.
  */
-
 
 /// Number of handovers that completed during the run, for the final summary.
 uint32_t g_handoverEndOkCount = 0;
@@ -178,7 +173,7 @@ NotifyHandoverEndErrorUe(std::string context, uint64_t imsi, uint16_t cellid, ui
 /**
  * Print a Measurement Report received by a gNB, with the quantized RSRP of each
  * measured cell and its equivalent in dBm. This is what to read when choosing
- * the handover margin.
+ * the Event A2 threshold.
  *
  * @param imsi The IMSI of the UE that sent the report.
  * @param cellId The ID of the cell that received the report.
@@ -346,31 +341,23 @@ int
 main(int argc, char* argv[])
 {
     uint16_t numberOfUes = 1;
-    uint16_t numberOfGnbs = 3;
-    Time simTime = Seconds(60);
+    uint16_t numberOfGnbs = 2;
+    Time simTime = Seconds(50);
     double distance = 200;
+    Time interval = Seconds(15);
     double speed = 15;
-    std::string scenario = "UMa";
-    std::string channelCondition = "Default";
     bool verbose = false;
     std::string dbFileName = "oran-repository.db";
 
-    // The middle cell of the row is the weak one by default, so that the UE
-    // meets it head on halfway through its travel with a strong cell on either
-    // side. This is 1-based to match the NR cell IDs.
-    uint16_t weakGnb = 2;
-    double gnbTxPower = 30.0;
-    double weakGnbTxPower = 18.0;
-
-    // The defaults of ns3::NrA3RsrpHandoverAlgorithm, so that the "oran" and
-    // "gnb" modes are configured identically out of the box.
-    double hysteresis = 3.0;
-    Time timeToTrigger = MilliSeconds(256);
-    // Event A3 reports every MS1024 for as long as the condition holds and stops
-    // when it clears, so the Logic Module uses the age of the last report as an
-    // implicit check that the condition still holds. This has to sit a little
-    // above the reporting interval.
-    Time maxReportAge = Seconds(1.5);
+    // The default is chosen for this scenario (Friis propagation at 2.8 GHz over
+    // 10 MHz, 30 dBm gNB transmit power, 200 m spacing), where the serving RSRP
+    // around the middle of the UE's travel is in the high 70s of the quantized
+    // range. It is deliberately not the 46 that NrA2A4RsrpHandoverAlgorithm
+    // defaults to: 46 means -111 dBm, which this scenario never reaches, so the
+    // Event A2 condition would never hold and no handover would ever be issued.
+    uint32_t a2Threshold = 77;
+    uint32_t neighbourCellOffset = 1;
+    Time maxReportAge = Seconds(1);
     Time lmQueryInterval = Seconds(0.5);
     Time reportInterval = Seconds(0.25);
     std::string handoverMode = "oran";
@@ -380,51 +367,21 @@ main(int argc, char* argv[])
     cmd.AddValue("verbose", "Enable printing SQL queries results", verbose);
     cmd.AddValue("handoverMode",
                  "Where the handover decision is taken: \"oran\" for the Near-RT RIC Logic "
-                 "Module, \"gnb\" for the stock ns3::NrA3RsrpHandoverAlgorithm at the gNB, "
+                 "Module, \"gnb\" for the stock ns3::NrA2A4RsrpHandoverAlgorithm at the gNB, "
                  "or \"none\" for no handovers at all",
                  handoverMode);
-    cmd.AddValue("numberOfGnbs", "Number of gNBs, placed in a row d apart", numberOfGnbs);
-    cmd.AddValue("weakGnb",
-                 "Which gNB gets the reduced transmit power, 1-based, matching the NR cell "
-                 "IDs. Set to 0 to give every gNB the same power and recover the degenerate "
-                 "case in which the strongest neighbour is always the nearest one",
-                 weakGnb);
-    cmd.AddValue("gnbTxPower", "Transmit power of the ordinary gNBs in dBm", gnbTxPower);
-    cmd.AddValue("weakGnbTxPower",
-                 "Transmit power of the reduced range gNB in dBm. The further this is below "
-                 "--gnbTxPower, the wider the stretch over which the weak cell is the nearest "
-                 "cell but not the strongest one",
-                 weakGnbTxPower);
     cmd.AddValue("printMeasReports",
                  "Print every RRC Measurement Report that a gNB receives",
                  printMeasReports);
-    cmd.AddValue("hysteresis",
-                 "Event A3 handover margin in dB (rounded to the nearest 0.5 dB). A "
-                 "non-negative value is applied as the A3 hysteresis IE; a negative value "
-                 "is applied as the signed A3 offset IE, which a plain hysteresis cannot "
-                 "represent",
-                 hysteresis);
-    cmd.AddValue("timeToTrigger",
-                 "Event A3 time-to-trigger: how long the entry condition must hold "
-                 "continuously in the UE RRC before a Measurement Report is sent",
-                 timeToTrigger);
-    cmd.AddValue("speed",
-                 "Speed of the UE in m/s. The UE always travels the same path, so raising "
-                 "this shortens the time it spends near the cell edge, which is what makes "
-                 "the delay of a handover decision start to matter",
-                 speed);
-    cmd.AddValue("distance", "Distance between adjacent gNBs in metres", distance);
-    cmd.AddValue("scenario",
-                 "Propagation scenario for the 3GPP channel model: \"UMa\", \"UMi\", or "
-                 "\"RMa\". Unlike free space propagation these have a path loss exponent "
-                 "well above 2 and add shadowing, so the cell edge is genuinely marginal "
-                 "and arriving late to a handover can cost packets",
-                 scenario);
-    cmd.AddValue("channelCondition",
-                 "Channel condition for the 3GPP channel model: \"Default\" for the "
-                 "scenario's own LOS/NLOS probability model, or \"LOS\" or \"NLOS\" to "
-                 "force one. \"Default\" makes the run stochastic, so sweep --RngRun",
-                 channelCondition);
+    cmd.AddValue("a2Threshold",
+                 "Event A2 threshold: the serving cell RSRP below which neighbour cells are "
+                 "considered for handover, in the quantized range [0..127] of Table 10.1.6.1-1 "
+                 "of 3GPP TS 38.133 (RSRP in dBm is this value minus 157)",
+                 a2Threshold);
+    cmd.AddValue("neighbourCellOffset",
+                 "Minimum offset between the serving and the best neighbour cell needed to "
+                 "trigger a handover, in the same quantized range",
+                 neighbourCellOffset);
     cmd.AddValue("maxReportAge", "Measurement Reports older than this are ignored", maxReportAge);
     cmd.AddValue("lmQueryInterval", "Interval between Logic Module queries", lmQueryInterval);
     cmd.AddValue("reportInterval", "Interval between periodic Report generation", reportInterval);
@@ -432,23 +389,8 @@ main(int argc, char* argv[])
     cmd.AddValue("dbFileName", "The name of the data repository file", dbFileName);
     cmd.Parse(argc, argv);
 
-    NS_ABORT_MSG_IF(hysteresis < -15.0 || hysteresis > 15.0,
-                    "hysteresis must be in the range [-15.0..15.0] dB");
-    NS_ABORT_MSG_IF(speed <= 0.0, "speed must be greater than zero");
-    NS_ABORT_MSG_IF(numberOfGnbs < 3,
-                    "numberOfGnbs must be at least 3, otherwise no Measurement Report ever "
-                    "carries more than one neighbour and there is no choice of target to make");
-    NS_ABORT_MSG_IF(weakGnb > numberOfGnbs, "weakGnb must be 0 or the 1-based index of a gNB");
-
-    // The UE sweeps the whole row of gNBs, overshooting the two end cells by an
-    // eighth of the gNB separation before it reverses. Deriving the reversal
-    // interval from the speed keeps that path identical as the speed changes, so
-    // that a speed sweep varies only how long the UE spends near a cell edge and
-    // not where it travels.
-    double span = (numberOfGnbs - 1) * distance;
-    double travel = span + distance / 4.0;
-    Time interval = Seconds(travel / speed);
-
+    NS_ABORT_MSG_IF(a2Threshold > 127, "a2Threshold must be in the range [0..127]");
+    NS_ABORT_MSG_IF(neighbourCellOffset > 127, "neighbourCellOffset must be in the range [0..127]");
     NS_ABORT_MSG_IF(handoverMode != "oran" && handoverMode != "gnb" && handoverMode != "none",
                     "handoverMode must be one of \"oran\", \"gnb\", or \"none\"");
 
@@ -456,9 +398,7 @@ main(int argc, char* argv[])
     // against it over the identical radio scenario.
     bool useOran = (handoverMode == "oran");
 
-    // The per gNB transmit power is applied to each PHY after installation, so
-    // this default only covers the UEs and any gNB the loop below does not reach.
-    Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(gnbTxPower));
+    Config::SetDefault("ns3::NrGnbPhy::TxPower", DoubleValue(30));
     Config::SetDefault("ns3::NrUePhy::TxPower", DoubleValue(23));
     Config::SetDefault("ns3::NrUePhy::EnableUplinkPowerControl", BooleanValue(false));
 
@@ -476,19 +416,22 @@ main(int argc, char* argv[])
 
     if (handoverMode == "gnb")
     {
-        // The stock gNB algorithm decides. It registers its own Event A3
-        // reporting configuration in DoInitialize, so none is installed by hand
-        // in this mode.
-        nrHelper->SetHandoverAlgorithmType("ns3::NrA3RsrpHandoverAlgorithm");
-        nrHelper->SetHandoverAlgorithmAttribute("Hysteresis", DoubleValue(hysteresis));
-        nrHelper->SetHandoverAlgorithmAttribute("TimeToTrigger", TimeValue(timeToTrigger));
+        // The stock gNB algorithm decides. It registers its own Event A2 and
+        // Event A4 reporting configurations in DoInitialize, so none are
+        // installed by hand in this mode.
+        nrHelper->SetHandoverAlgorithmType("ns3::NrA2A4RsrpHandoverAlgorithm");
+        nrHelper->SetHandoverAlgorithmAttribute("ServingCellThreshold",
+                                                UintegerValue(a2Threshold));
+        nrHelper->SetHandoverAlgorithmAttribute("NeighbourCellOffset",
+                                                UintegerValue(neighbourCellOffset));
     }
     else
     {
         // All handover decisions come from the RIC, or from nowhere at all in
         // the "none" mode. Note that this also means that no measurement
         // reporting configuration is registered by the gNB, so in the "oran"
-        // mode the Event A3 configuration is installed explicitly further down.
+        // mode the Event A2 and Event A4 configurations are installed
+        // explicitly further down.
         nrHelper->SetHandoverAlgorithmType("ns3::NrNoOpHandoverAlgorithm");
     }
 
@@ -516,42 +459,17 @@ main(int argc, char* argv[])
     {
         Ptr<ConstantVelocityMobilityModel> mob =
             ueNodes.Get(i)->GetObject<ConstantVelocityMobilityModel>();
-        mob->SetPosition(Vector((span / 2.0) - (speed * (interval.GetSeconds() / 2)), 0, 1.5));
+        mob->SetPosition(Vector((distance / 2) - (speed * (interval.GetSeconds() / 2)), 0, 1.5));
         mob->SetVelocity(Vector(speed, 0, 0));
     }
 
     Simulator::Schedule(interval, &ReverseVelocity, ueNodes, interval);
 
-    // The 3GPP spectrum propagation model is a phased array model and asserts
-    // that both ends have a PhasedArrayModel installed, so the antennas cannot
-    // simply be set to IsotropicAntennaModel with SetUeAntennaTypeId, which
-    // replaces the array object itself. A one by one array of isotropic elements
-    // keeps the omnidirectional radiation pattern that this scenario relies on
-    // while still being a phased array: the handover decisions stay driven by
-    // path loss and shadowing rather than by beamforming gain.
-    nrHelper->SetUeAntennaAttribute("NumRows", UintegerValue(1));
-    nrHelper->SetUeAntennaAttribute("NumColumns", UintegerValue(1));
-    nrHelper->SetUeAntennaAttribute("AntennaElement",
-                                    PointerValue(CreateObject<IsotropicAntennaModel>()));
+    nrHelper->SetUeAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
+    nrHelper->SetGnbAntennaTypeId(IsotropicAntennaModel::GetTypeId().GetName());
 
-    nrHelper->SetGnbAntennaAttribute("NumRows", UintegerValue(1));
-    nrHelper->SetGnbAntennaAttribute("NumColumns", UintegerValue(1));
-    nrHelper->SetGnbAntennaAttribute("AntennaElement",
-                                     PointerValue(CreateObject<IsotropicAntennaModel>()));
-
-    // A 3GPP channel model rather than free space propagation. Friis decays as
-    // the square of the distance and, at the transmit powers used here, leaves
-    // the UE with a comfortable signal everywhere along the row of gNBs, so a
-    // handover that arrives late never risks a coverage hole and the delay of
-    // the decision cannot be measured. The 3GPP scenarios have a path loss
-    // exponent well above 2 and add shadowing, which is what produces a cell
-    // edge where being late actually costs packets.
-    //
-    // With a "Default" channel condition the LOS/NLOS state is drawn from the
-    // scenario's own probability model, so unlike the free space configuration
-    // the results vary with --RngRun and have to be averaged over several runs.
     Ptr<NrChannelHelper> channelHelper = CreateObject<NrChannelHelper>();
-    channelHelper->ConfigureFactories(scenario, channelCondition, "ThreeGpp");
+    channelHelper->ConfigurePropagationFactory(FriisPropagationLossModel::GetTypeId());
 
     CcBwpCreator ccBwpCreator;
     CcBwpCreator::SimpleOperationBandConf bandConf(2.8e9, 10e6, static_cast<uint8_t>(1));
@@ -562,17 +480,6 @@ main(int argc, char* argv[])
 
     NetDeviceContainer gnbDevs = nrHelper->InstallGnbDevice(gnbNodes, allBwps);
     NetDeviceContainer ueDevs = nrHelper->InstallUeDevice(ueNodes, allBwps);
-
-    // The reduced range cell. This is what stops the strongest neighbour from
-    // always being the nearest one, and so is what gives the Logic Module's
-    // choice of target a right and a wrong answer.
-    for (uint32_t idx = 0; idx < gnbDevs.GetN(); idx++)
-    {
-        double txPower = (weakGnb > 0 && idx == static_cast<uint32_t>(weakGnb - 1))
-                             ? weakGnbTxPower
-                             : gnbTxPower;
-        NrHelper::GetGnbPhy(gnbDevs.Get(idx), 0)->SetTxPower(txPower);
-    }
 
     NodeContainer remoteHostContainer;
     remoteHostContainer.Create(1);
@@ -641,11 +548,12 @@ main(int argc, char* argv[])
                                       "DatabaseFile",
                                       StringValue(dbFileName));
 
-        // There is no Hysteresis, A3Offset, or TimeToTrigger attribute here: all
-        // three live in the Event A3 reporting configuration installed on the gNB
-        // below, and all three are applied by the UE RRC before the report is
-        // sent. MaxReportAge is the only knob the Logic Module has.
-        oranHelper->SetDefaultLogicModule("ns3::OranLmNr2NrA3RsrpHandover",
+        // There is no ServingCellThreshold attribute here: that threshold lives in
+        // the Event A2 reporting configuration installed on the gNB below, and is
+        // evaluated by the UE RRC.
+        oranHelper->SetDefaultLogicModule("ns3::OranLmNr2NrA2A4RsrpHandover",
+                                          "NeighbourCellOffset",
+                                          UintegerValue(neighbourCellOffset),
                                           "MaxReportAge",
                                           TimeValue(maxReportAge),
                                           "ProcessingDelayRv",
@@ -676,34 +584,25 @@ main(int argc, char* argv[])
 
         e2NodeTerminatorsUes.Add(oranHelper->DeployTerminators(nearRtRic, ueNodes));
 
-        // The Event A3 reporting configuration: a neighbour cell became offset
-        // better than the primary cell. This mirrors what
-        // NrA3RsrpHandoverAlgorithm::DoInitialize installs, so that the "oran" and
-        // "gnb" modes evaluate the identical condition.
-        //
-        // A non-negative margin is applied as hysteresis. A negative margin (for
-        // example the TR 36.839 Set 5 a3-offset of -1 dB) cannot be a hysteresis,
-        // since that IE is unsigned, so it is applied as the signed A3 offset.
-        int8_t a3OffsetIeValue = 0;
-        uint8_t hysteresisIeValue = 0;
+        // The Event A2 reporting configuration: the serving cell became worse than
+        // the threshold. This is the first condition of the handover algorithm.
+        NrRrcSap::ReportConfigEutra reportConfigA2;
+        reportConfigA2.eventId = NrRrcSap::ReportConfigEutra::EVENT_A2;
+        reportConfigA2.threshold1.choice = NrRrcSap::ThresholdEutra::THRESHOLD_RSRP;
+        reportConfigA2.threshold1.range = a2Threshold;
+        reportConfigA2.triggerQuantity = NrRrcSap::ReportConfigEutra::RSRP;
+        reportConfigA2.reportInterval = NrRrcSap::ReportConfigEutra::MS240;
 
-        if (hysteresis >= 0.0)
-        {
-            hysteresisIeValue = nr::EutranMeasurementMapping::ActualHysteresis2IeValue(hysteresis);
-        }
-        else
-        {
-            a3OffsetIeValue = nr::EutranMeasurementMapping::ActualA3Offset2IeValue(hysteresis);
-        }
-
-        NrRrcSap::ReportConfigEutra reportConfigA3;
-        reportConfigA3.eventId = NrRrcSap::ReportConfigEutra::EVENT_A3;
-        reportConfigA3.a3Offset = a3OffsetIeValue;
-        reportConfigA3.hysteresis = hysteresisIeValue;
-        reportConfigA3.timeToTrigger = timeToTrigger.GetMilliSeconds();
-        reportConfigA3.reportOnLeave = false;
-        reportConfigA3.triggerQuantity = NrRrcSap::ReportConfigEutra::RSRP;
-        reportConfigA3.reportInterval = NrRrcSap::ReportConfigEutra::MS1024;
+        // The Event A4 reporting configuration: a neighbour cell became better than
+        // the threshold. The threshold is intentionally very low so that every
+        // detectable neighbour is reported, which is what supplies the Logic Module
+        // with the neighbour cell measurements for the second condition.
+        NrRrcSap::ReportConfigEutra reportConfigA4;
+        reportConfigA4.eventId = NrRrcSap::ReportConfigEutra::EVENT_A4;
+        reportConfigA4.threshold1.choice = NrRrcSap::ThresholdEutra::THRESHOLD_RSRP;
+        reportConfigA4.threshold1.range = 0;
+        reportConfigA4.triggerQuantity = NrRrcSap::ReportConfigEutra::RSRP;
+        reportConfigA4.reportInterval = NrRrcSap::ReportConfigEutra::MS480;
 
         // NR gNB terminators. These are built by hand rather than through
         // OranHelper::AddReporter because each Measurement Report Reporter has to be
@@ -735,11 +634,14 @@ main(int argc, char* argv[])
             NS_ABORT_MSG_IF(gnbDev == nullptr, "Unable to find the NR gNB network device");
             Ptr<NrGnbRrc> gnbRrc = gnbDev->GetRrc();
 
-            // Install the reporting configuration and record which measurement IDs
-            // it produced, so that the Logic Module can tell an Event A3 report
-            // from any other. This has to happen before the simulation starts.
-            measReporter->AddMeasIds(OranReportNrGnbMeasReport::EVENT_A3,
-                                     gnbRrc->AddUeMeasReportConfig(reportConfigA3));
+            // Install the reporting configurations and record which measurement IDs
+            // belong to which event, so that the Logic Module can tell an Event A2
+            // report apart from an Event A4 report. This has to happen before the
+            // simulation starts.
+            measReporter->AddMeasIds(OranReportNrGnbMeasReport::EVENT_A2,
+                                     gnbRrc->AddUeMeasReportConfig(reportConfigA2));
+            measReporter->AddMeasIds(OranReportNrGnbMeasReport::EVENT_A4,
+                                     gnbRrc->AddUeMeasReportConfig(reportConfigA4));
 
             gnbRrc->TraceConnectWithoutContext(
                 "RecvMeasurementReport",
@@ -796,19 +698,9 @@ main(int argc, char* argv[])
     FlowMonitorHelper flowmonHelper;
     Ptr<FlowMonitor> monitor = flowmonHelper.InstallAll();
 
-    std::cout << "Handover mode " << handoverMode << ", Event A3 hysteresis " << hysteresis
-              << " dB, time-to-trigger " << timeToTrigger.GetMilliSeconds() << " ms" << std::endl;
-    std::cout << "gNBs at x =";
-    for (uint16_t i = 0; i < numberOfGnbs; i++)
-    {
-        bool weak = (weakGnb > 0 && i == weakGnb - 1);
-        std::cout << " " << (distance * i) << " m (CellId " << (i + 1) << ", "
-                  << (weak ? weakGnbTxPower : gnbTxPower) << " dBm" << (weak ? ", weak)" : ")");
-    }
-    std::cout << std::endl;
-    std::cout << "UE sweeps x = " << ((span / 2.0) - (speed * (interval.GetSeconds() / 2))) << " m to "
-              << ((span / 2.0) + (speed * (interval.GetSeconds() / 2))) << " m at " << speed
-              << " m/s, reversing every " << interval.GetSeconds() << " s" << std::endl;
+    std::cout << "Handover mode " << handoverMode << ", Event A2 threshold " << a2Threshold << " ("
+              << nr::EutranMeasurementMapping::RsrpRange2Dbm(a2Threshold)
+              << " dBm), neighbour cell offset " << neighbourCellOffset << std::endl;
 
     Simulator::Stop(simTime);
     Simulator::Run();
