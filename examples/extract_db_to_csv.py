@@ -15,7 +15,7 @@ import sqlite3
 T_OFFSET = 3.0          # Start time offset (g_tOffset in the example scenario)
 UE_NODEID = 3           # NS-3 node ID of the UE we're extracting data for
 UE_Z = 1.5              # UE antenna height in meters (for 3D distance calc)
-STEP_NS = 100_000_000   # Sampling interval in nanoseconds (0.1 s)
+STEP_NS = 100_000_000   # Default sampling interval in nanoseconds (0.1 s)
 
 # Map from DB cell ID to (PCI, gNB position (x, y, z))
 # These must match the gNB configuration in the simulation script
@@ -68,7 +68,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("db")
     ap.add_argument("-o", "--out", default="vienna-ho-extracted-0.1s.csv")
+    ap.add_argument("--step", type=float, default=STEP_NS / 1e9,
+                    help="sampling interval in seconds (default 0.1)")
+    ap.add_argument("--no-sinr", action="store_true",
+                    help="omit the sinr_serving_db column")
+    ap.add_argument("--segment", default=None,
+                    help="value for an extra leading 'segment' column, so several runs "
+                         "can be concatenated and split by segment rather than by row")
     args = ap.parse_args()
+
+    step_ns = int(round(args.step * 1e9))
 
     con = sqlite3.connect(args.db)
     cur = con.cursor()
@@ -103,10 +112,20 @@ def main():
     ))
 
     # Load handover command timestamps
-    # Set of timestamps where the Logic Module issued a handover command.
-    # Used to label the ho_command_issued column (ML training target).
+    # Set of timestamps where a command was actually DISPATCHED to a node, used
+    # to label the ho_command_issued column (ML training target).
+    #
+    # This reads terminatorcommand, not lmcommand. The Logic Module re-proposes
+    # the same handover on every query cycle until the UE is recorded on the new
+    # cell, so lmcommand holds ~3 rows per handover and the Conflict Mitigation
+    # Module drops all but the first ("Excluding a pending command" in
+    # cmmaction). Labelling from lmcommand therefore marks several ticks per
+    # event, including ticks AFTER the handover has already completed, where the
+    # features already show the new serving cell - i.e. guaranteed false
+    # positives. terminatorcommand holds exactly the commands that reached a
+    # node, one per handover.
     ho_times = {t for (t,) in cur.execute(
-        "SELECT DISTINCT simulationtime FROM lmcommand"
+        "SELECT DISTINCT simulationtime FROM terminatorcommand"
     )}
 
     # Build the 0.1 s sampling grid
@@ -116,12 +135,20 @@ def main():
     off_ns = int(T_OFFSET * 1e9)
     t_start = max(off_ns, rsrp_times[0])
     t_end = min(rsrp_times[-1], loc[-1][0]) if loc else rsrp_times[-1]
-    n0 = math.ceil((t_start - off_ns) / STEP_NS)  # first grid index >= t_start
+    n0 = math.ceil((t_start - off_ns) / step_ns)  # first grid index >= t_start
+
+    # Snap each dispatch to the grid tick at or before it. Dispatches are offset
+    # from the query grid by the Logic Module's processing delay (10 ms in the
+    # vienna examples), so they do not fall on a tick and cannot be matched
+    # exactly. Rounding DOWN labels the last tick whose features precede the
+    # command, which is the tick a predictor would have to fire on.
+    ho_ticks = {off_ns + ((t - off_ns) // step_ns) * step_ns
+                for t in ho_times if t >= off_ns}
 
     rows_out = []
     n = n0
     while True:
-        t_ns = off_ns + n * STEP_NS  # current grid tick in nanoseconds
+        t_ns = off_ns + n * step_ns  # current grid tick in nanoseconds
         if t_ns > t_end:
             break
         n += 1
@@ -153,31 +180,43 @@ def main():
         dser = dist3d(ux, uy, CELLS[serving_cell][1]) if loc else ""
         dnei = dist3d(ux, uy, CELLS[neigh_cell][1]) if (loc and neigh_cell) else ""
 
-        # Handover label: 1 if the LM issued a command at this tick
-        ho = 1 if t_ns in ho_times else 0
+        # Handover label: 1 if a command was dispatched during this tick
+        ho = 1 if t_ns in ho_ticks else 0
 
-        rows_out.append([
+        row = [
             round((t_ns - off_ns) / 1e9, 3),  # relative sim time in seconds
             serving_pci, rsrp_serving, neigh_pci, rsrp_neigh,
-            sinr_serving, ux, uy, dser, dnei, ho,
-        ])
+        ]
+        if not args.no_sinr:
+            row.append(sinr_serving)
+        row += [ux, uy, dser, dnei, ho]
+        if args.segment is not None:
+            row.insert(0, args.segment)
+        rows_out.append(row)
 
     con.close()
 
     # Deduplicate consecutive handover labels
-    # The LM can re-emit the same handover command on the next query cycle
-    # before the HO completes, producing two adjacent ho=1 ticks. We keep
-    # only the first so each real HO event maps to exactly one positive
-    # label (important for balanced ML training).
-    HO = 10  # column index of ho_command_issued in each row
+    # Kept as a safety net. Labelling from terminatorcommand already yields one
+    # positive per handover, but a step finer than the dispatch spacing, or a
+    # scenario where two commands land in adjacent ticks, could still produce a
+    # run. Keep only the first so each event maps to exactly one positive label
+    # (important for balanced ML training). Note this collapses only ADJACENT
+    # pairs, so a run of three would leave the first and the third.
+    HO = len(rows_out[0]) - 1 if rows_out else 10  # ho_command_issued is the last column
     for i in range(1, len(rows_out)):
         if rows_out[i][HO] == 1 and rows_out[i - 1][HO] == 1:
             rows_out[i][HO] = 0
 
     # Write output CSV
-    header = ("sim_time_s,serving_pci,rsrp_serving_dbm,neighbor_pci,"
-              "rsrp_neighbor_dbm,sinr_serving_db,ue_x,ue_y,"
-              "dist_serving_m,dist_neighbor_m,ho_command_issued")
+    cols = ["sim_time_s", "serving_pci", "rsrp_serving_dbm",
+            "neighbor_pci", "rsrp_neighbor_dbm"]
+    if not args.no_sinr:
+        cols.append("sinr_serving_db")
+    cols += ["ue_x", "ue_y", "dist_serving_m", "dist_neighbor_m", "ho_command_issued"]
+    if args.segment is not None:
+        cols.insert(0, "segment")
+    header = ",".join(cols)
     with open(args.out, "w") as f:
         f.write(header + "\n")
         for r in rows_out:
