@@ -200,6 +200,48 @@ build_lib_example(
     ${libapplications}
 )
 
+build_lib_example(
+  NAME vienna-ho-replay-a3-no-ttt
+  SOURCE_FILES vienna-ho-replay-a3-no-ttt.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+)
+
+build_lib_example(
+  NAME vienna-ho-replay-trace
+  SOURCE_FILES vienna-ho-replay-trace.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libpropagation}
+    ${libflow-monitor}
+)
+
+build_lib_example(
+  NAME vienna-ho-replay-pingpong
+  SOURCE_FILES vienna-ho-replay-pingpong.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libantenna}
+)
+
 if(${OnnxRuntime_FOUND})
   build_lib_example(
     NAME oran-nr-2-nr-rsrp-sinr-onnx-handover-example
