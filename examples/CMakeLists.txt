@@ -214,6 +214,21 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME vienna-ho-fitted-pingpong
+  SOURCE_FILES vienna-ho-fitted-pingpong.cc
+  LIBRARIES_TO_LINK
+    ${liboran}
+    ${libnetwork}
+    ${libnr}
+    ${libmobility}
+    ${libinternet}
+    ${libpoint-to-point}
+    ${libapplications}
+    ${libpropagation}
+    ${libflow-monitor}
+)
+
+build_lib_example(
   NAME vienna-ho-replay-trace
   SOURCE_FILES vienna-ho-replay-trace.cc
   LIBRARIES_TO_LINK
@@ -254,6 +269,21 @@ if(${OnnxRuntime_FOUND})
       ${libinternet}
       ${libpoint-to-point}
       ${libapplications}
+  )
+
+  build_lib_example(
+    NAME vienna-ho-onnx-lm
+    SOURCE_FILES vienna-ho-onnx-lm.cc
+    LIBRARIES_TO_LINK
+      ${liboran}
+      ${libnetwork}
+      ${libnr}
+      ${libmobility}
+      ${libinternet}
+      ${libpoint-to-point}
+      ${libapplications}
+      ${libpropagation}
+      ${libflow-monitor}
   )
 endif()
 
