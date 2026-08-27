@@ -19,7 +19,6 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [Download ZIP](#download-zip)
   * [Connecting the Module Quickly](#connecting-the-module-quickly)
     * [Cmake](#cmake-quick-connect)
-    * [Code](#code-quick-connect)
   * [Connecting the Module Safely](#connecting-the-module-safely)
     * [Cmake](#cmake-safe-connect)
     * [Code](#code-safe-connect)
@@ -44,8 +43,14 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [NR to NR Distance Handover Example](#nr-to-nr-distance-handover-example)
   * [NR to NR RSRP Handover LM Example](#nr-to-nr-rsrp-handover-lm-example)
   * [NR to NR CMM Handover Example](#nr-to-nr-cmm-handover-example)
+  * [NR to NR Event A3 Handover Example](#nr-to-nr-event-a3-handover-example)
+  * [NR to NR Event A2/A4 Handover Example](#nr-to-nr-event-a2a4-handover-example)
   * [Vienna Drive-Test Replay Example](#vienna-drive-test-replay-example)
+  * [Vienna Measured-Pathloss Replay Example](#vienna-measured-pathloss-replay-example)
+  * [Vienna Ping-Pong Replay Example](#vienna-ping-pong-replay-example)
+  * [Vienna Fitted-Channel Example](#vienna-fitted-channel-example)
   * [NR to NR RSRP SINR ONNX Handover Example](#nr-to-nr-rsrp-sinr-onnx-handover-example)
+  * [Vienna Rule versus Learned Model Example](#vienna-rule-versus-learned-model-example)
 * [Testing](#testing)
 * [Reproducing the ONNX Handover Pipeline](#reproducing-the-onnx-handover-pipeline)
   * [Step 1: Run the Rule-Based Handover Replay](#step-1-run-the-rule-based-handover-replay)
@@ -54,6 +59,7 @@ be found here: [https://doi.org/10.1145/3592149.3592157](https://doi.org/10.1145
   * [Step 4: Train the Logistic Regression Model](#step-4-train-the-logistic-regression-model)
   * [Step 5: Run the ONNX Handover Example](#step-5-run-the-onnx-handover-example)
   * [Step 6: Extract and Compare Results](#step-6-extract-and-compare-results)
+  * [Training the Lagged-RSRP Model](#training-the-lagged-rsrp-model)
 
 # Project Overview
 This project has been developed by the National Institute of Standards and Technology (NIST)
@@ -132,21 +138,46 @@ require the [5G-LENA](https://5g-lena.cttc.es/) module to be installed in the
   (`OranE2NodeTerminatorNrUe`)
 - Reporting capabilities for NR UE cell attachment, NR UE RSRP/RSRQ
   measurements, and NR UE DL Control SINR measurements
+- Capture of the 3GPP RRC Measurement Reports arriving at the gNB
+  (`OranReporterNrGnbMeasReport` / `OranReportNrGnbMeasReport`), preserving
+  the quantization and event identity the UE RRC produced. These are the same
+  measurements a gNB handover algorithm sees, which is what lets a Logic
+  Module reproduce that algorithm's decision at the RIC
 - Generation and execution of NR-to-NR handover Commands
   (`OranCommandNr2NrHandover`)
 - Report Trigger for NR UE handover events
   (`OranReportTriggerNrUeHandover`)
-- SQLite data repository extensions with five new tables (`nrgnb`, `nrue`,
-  `nruecell`, `nruersrprsrq`, `nruesinr`)
-- NR-native Logic Modules (xApps):
-  - `OranLmNr2NrDistanceHandover` - hands UEs over to the closest gNB by
-    position
-  - `OranLmNr2NrRsrpHandover` - hands UEs over to the gNB with the
-    strongest RSRP
-  - `OranLmNr2NrRsrpSinrHandover` - SINR-gated RSRP handover that only
-    triggers when the serving cell SINR drops below a configurable threshold
-  - `OranLmNr2NrRsrpSinrOnnxHandover` - ML-based handover using an ONNX
-    model that takes SINR and RSRP difference as inputs
+- SQLite data repository extensions with six new tables (`nrgnb`, `nrue`,
+  `nruecell`, `nruersrprsrq`, `nruesinr`, `nrgnbmeasreport`)
+- NR-native Logic Modules (xApps), in three families:
+  - Measurement-driven, from UE PHY traces:
+    - `OranLmNr2NrDistanceHandover` - hands UEs over to the closest gNB by
+      position
+    - `OranLmNr2NrRsrpHandover` - hands UEs over to the gNB with the
+      strongest RSRP
+    - `OranLmNr2NrRsrpSinrHandover` - SINR-gated RSRP handover that only
+      triggers when the serving cell SINR drops below a configurable threshold
+  - Standards-track, from gNB RRC Measurement Reports. These reproduce the
+    decisions of the stock 5G-LENA gNB algorithms at the RIC. Neither
+    evaluates a measurement condition of its own: the event conditions,
+    hysteresis, and time-to-trigger belong to the reporting configuration and
+    are applied by the UE RRC, so they cannot be weakened at the RIC:
+    - `OranLmNr2NrA3RsrpHandover` - reproduces `NrA3RsrpHandoverAlgorithm`
+    - `OranLmNr2NrA2A4RsrpHandover` - reproduces `NrA2A4RsrpHandoverAlgorithm`
+  - ML-driven, via ONNX Runtime:
+    - `OranLmNr2NrRsrpSinrOnnxHandover` - takes SINR and RSRP difference as
+      inputs
+    - `OranLmNr2NrRsrpLagOnnxHandover` - takes a history of RSRP differences
+      between the best neighbour and the serving cell. Lags are spaced by one
+      Logic Module query rather than by a fixed time
+- Inter-RAT (NSA EN-DC) support, where the LTE eNB is the Master Node and
+  Secondary Cell Group (SCG) decisions are taken there:
+  `OranCommandNr2LteHandover` releases the SCG,
+  `OranCommandLte2NrHandover` re-adds it, and
+  `OranLmInterRatRsrpHandover` applies A1/A2-style thresholds to NR RSRP,
+  pairing NR and LTE UEs by IMSI. Note that `ns-3` does not model the SCG
+  procedure at the radio level, so these decisions are logged to the command
+  table rather than executed on the radio
 - Extended Conflict Mitigation Modules (`OranCmmHandover` and
   `OranCmmSingleCommandPerNode`) to recognize and filter NR handover commands
 
@@ -307,7 +338,7 @@ check for the presence of the `oran` module.
 Note: If you are using CMake and the module is in the `src/` directory, you
 may have to add this definition yourself (`scratch/` and module examples are
 fine). See
-[the CMake build system section for more information](#build-system).
+[the CMake build system section for more information](#cmake-safe-connect).
 
 ```cpp
 // Guard the include with the macro
@@ -675,6 +706,31 @@ To verify that duplicate commands were filtered, inspect the CMM action log:
 sqlite3 oran-repository.db "SELECT * FROM cmmaction ORDER BY time;"
 ```
 
+## NR to NR Event A3 Handover Example
+Compares the stock 5G-LENA `NrA3RsrpHandoverAlgorithm` running at the gNB
+against `OranLmNr2NrA3RsrpHandover` running at the RIC, over an identical
+scenario. The `--handoverMode` switch selects one of three arms: `gnb` runs
+the stock algorithm with no RIC, `oran` installs `NrNoOpHandoverAlgorithm` on
+the gNBs and lets the Logic Module decide from the same Measurement Reports,
+and `none` installs no handover algorithm at all. A FlowMonitor is installed
+in every arm, so the arms can be compared on delivered traffic as well as on
+handover count and timing.
+
+```shell
+./ns3 run "oran-nr-2-nr-a3-handover-example --handoverMode=gnb"
+./ns3 run "oran-nr-2-nr-a3-handover-example --handoverMode=oran"
+./ns3 run "oran-nr-2-nr-a3-handover-example --handoverMode=none"
+```
+
+## NR to NR Event A2/A4 Handover Example
+The same three-arm comparison for `NrA2A4RsrpHandoverAlgorithm` against
+`OranLmNr2NrA2A4RsrpHandover`.
+
+```shell
+./ns3 run "oran-nr-2-nr-a2-a4-handover-example --handoverMode=gnb"
+./ns3 run "oran-nr-2-nr-a2-a4-handover-example --handoverMode=oran"
+```
+
 ## Vienna Drive-Test Replay Example
 This example replays a real handover event observed in a Vienna 5G drive-test
 dataset. The scenario reproduces a PCI 331 to PCI 286 handover using two NR
@@ -686,6 +742,50 @@ configurable via command-line arguments.
 
 ```shell
 ./ns3 run "vienna-ho-replay --verbose"
+```
+
+This example predicts the radio environment from geometry. Because the UE
+moves towards the cell it leaves and away from the cell it joins, the
+geometric reconstruction produces a monotone RSRP differential that no
+setting of hysteresis, time-to-trigger, azimuth, or beamwidth can cross, so
+it yields no Event A3 report at all. `vienna-ho-replay-a3-no-ttt` makes that
+concrete by setting the time-to-trigger to zero, the most permissive legal
+3GPP value; re-run it with `--timeToTrigger=256ms` for the default baseline.
+
+```shell
+./ns3 run "vienna-ho-replay-a3-no-ttt --verbose"
+```
+
+## Vienna Measured-Pathloss Replay Example
+Replays the pathloss the drive test actually measured rather than predicting
+it from geometry, so what is under test is the handover logic and not the
+channel model. The RIC runs `OranLmNr2NrA3RsrpHandover`.
+
+```shell
+./ns3 run "vienna-ho-replay-trace --verbose"
+```
+
+## Vienna Ping-Pong Replay Example
+Replays the full sequence of five handovers observed in the dataset across
+PCI 331, 285, and 286, rather than the single 331 to 286 transition. A
+ping-pong is a better test of an Event A3 Logic Module than one clean
+handover, because suppressing ping-pong is what A3 hysteresis and
+time-to-trigger exist to do. Sweep `--hysteresis` and `--timeToTrigger` to
+trade handover count against how closely the sequence tracks the real one.
+
+```shell
+./ns3 run "vienna-ho-replay-pingpong --verbose"
+```
+
+## Vienna Fitted-Channel Example
+Because measured pathloss is indexed by time rather than position, the
+trajectory in the replay examples is fixed. This example instead fits a
+pathloss model to the measured samples as a function of distance and
+off-boresight angle, so position drives RSRP again and trajectories become
+designable. The default trajectory sways across the cell boundary.
+
+```shell
+./ns3 run "vienna-ho-fitted-pingpong --verbose"
 ```
 
 ## NR to NR RSRP SINR ONNX Handover Example
@@ -706,6 +806,32 @@ between serving and best neighbour) and outputs a binary handover decision.
 cp contrib/oran/examples/nr_rsrp_sinr_logistic.onnx .
 
 ./ns3 run "oran-nr-2-nr-rsrp-sinr-onnx-handover-example --verbose"
+```
+
+## Vienna Rule versus Learned Model Example
+Holds channel, geometry, trajectory, and RIC timing identical over the fitted
+scenario and varies only who decides, across three arms selected by `--lm`.
+Arm `ran` lets the gNB's own `NrA3RsrpHandoverAlgorithm` decide while the RIC
+still stores every report under `OranLmNoop`; arm `a3` runs the rule-based
+`OranLmNr2NrA3RsrpHandover`, which is what produced the training labels; and
+arm `onnx` replaces it with `OranLmNr2NrRsrpLagOnnxHandover`.
+
+Unlike the older ONNX example, the model path defaults to
+`contrib/oran/examples/vienna_ho_rf_lag.onnx`, so nothing has to be copied to
+the ns-3 root.
+
+The lag features are spaced by one Logic Module query rather than by a fixed
+time, so `--lm-query-interval` must stay at the 0.1 s the training data was
+sampled at. The example refuses to run the ONNX arm at any other value rather
+than silently feeding the model a rescaled history.
+
+```shell
+./ns3 run "vienna-ho-onnx-lm --lm=ran"
+./ns3 run "vienna-ho-onnx-lm --lm=a3"
+./ns3 run "vienna-ho-onnx-lm --lm=onnx"
+
+# Shorter history window: fills sooner, so the command issues with less delay
+./ns3 run "vienna-ho-onnx-lm --lm=onnx --num-lags=3"
 ```
 
 # Reproducing the ONNX Handover Pipeline
@@ -805,6 +931,44 @@ cd ../../..
 > **Note:** A pre-trained ONNX model is already included in the `examples/`
 > directory. You may skip this step if you do not need to retrain the model.
 
+## Training the Lagged-RSRP Model
+
+The pipeline above trains on the instantaneous SINR and RSRP difference. The
+SINR values reported through the NR PHY trace proved too inaccurate to train
+against, so the model used by `vienna-ho-onnx-lm` drops SINR entirely and
+learns from a short history of RSRP differences instead. Because the label
+marks the instant the RIC dispatched the command, a classifier given only the
+instantaneous difference cannot represent the time-to-trigger offset; the lag
+window is what makes the two distinguishable.
+
+Generate a dataset from a run of the fitted scenario, then train:
+
+```shell
+./ns3 run "vienna-ho-fitted-pingpong"
+
+python3 contrib/oran/examples/extract_db_to_csv.py \
+    vienna-ho-fitted.db -o vienna-fitted-dataset.csv
+
+python3 contrib/oran/examples/vienna_ho_rf_lag.py \
+    --csv vienna-fitted-dataset.csv
+```
+
+The training script writes `vienna_ho_rf_lag.onnx` next to itself, in
+`examples/`, which is where `vienna-ho-onnx-lm` looks for it by default. It
+exports a 100-tree `RandomForestClassifier` with balanced class weights
+through `skl2onnx` at opset 15 with ZipMap disabled, so the output is a plain
+`[N, 2]` probability tensor. Nothing in the Logic Module is specific to a
+forest: any classifier with that signature can be substituted through the
+`OnnxModelPath` attribute.
+
+The script reports both a shuffled and a chronological split. Prefer the
+chronological one: a shuffled split places near-copies of the same lag vector
+on both sides of the boundary and reports an optimistic score.
+
+> **Note:** Generated CSVs are not kept under version control (`*.csv` is in
+> `.gitignore`). Regenerate the dataset with `extract_db_to_csv.py` as above
+> rather than expecting one in the tree.
+
 ## Step 5: Run the ONNX Handover Example
 
 Run the same Vienna drive-test scenario, but this time using the trained ONNX
@@ -848,10 +1012,13 @@ triggered a handover, allowing direct comparison of timing and decision
 quality between the two approaches.
 
 # Testing
-The module includes a test suite with 12 test cases (1 upstream + 11 NR)
+The module includes a test suite with 14 test cases (1 upstream + 13 NR)
 covering reports, repository operations, E2 dispatch, Logic Module decision
-logic, and missing-gNB guard handling. All NR tests run without an NR radio
-stack, using direct DB API calls and the generic `OranE2NodeTerminatorWired`.
+logic, and missing-gNB guard handling. Of the NR cases, three are data-model
+tests, four exercise the repository, and six cover Logic Module decisions,
+including that the A2/A4 and A3 Logic Modules ignore Measurement Reports older
+than `MaxReportAge`. All NR tests run without an NR radio stack, using direct
+DB API calls and the generic `OranE2NodeTerminatorWired`.
 
 ```shell
 ./test.py -s oran -v
