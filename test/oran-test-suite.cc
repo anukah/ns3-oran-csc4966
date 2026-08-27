@@ -948,6 +948,291 @@ class OranTestCaseNrDistanceHandover : public TestCase
 };
 
 /**
+ * Verify the decision logic of OranLmNr2NrA2A4RsrpHandover, which reproduces the
+ * decision of the ns3::NrA2A4RsrpHandoverAlgorithm gNB handover algorithm from
+ * the RRC Measurement Reports captured at the gNB.
+ *
+ * The measurements are seeded directly into the data repository in the quantized
+ * ranges of Table 10.1.6.1-1 of 3GPP TS 38.133, which is how the Reporter stores
+ * them. No radio stack is needed: the arrival of an Event A2 report is itself the
+ * first condition of the algorithm, since the A2 threshold is evaluated in the UE
+ * RRC and not by the Logic Module.
+ */
+class OranTestCaseNrA2A4LmDecision : public TestCase
+{
+  public:
+    OranTestCaseNrA2A4LmDecision()
+        : TestCase("Oran Test Case NR A2-A4 RSRP LM Decision Logic")
+    {
+    }
+
+  private:
+    /**
+     * Register the common topology and the UE cell attachment.
+     *
+     * Topology: gNB1 (nodeId=1, cellId=10), gNB2 (nodeId=2, cellId=20)
+     *           UE (nodeId=3, imsi=100) attached to gNB1 (cellId=10, rnti=5)
+     *
+     * @param ric The Near-RT RIC.
+     * @param t The time to record the entries at.
+     */
+    void SeedTopology(Ptr<OranNearRtRic> ric, Time t)
+    {
+        ric->Data()->RegisterNodeNrGnb(1, 10);
+        ric->Data()->RegisterNodeNrGnb(2, 20);
+        ric->Data()->RegisterNodeNrUe(3, 100);
+        ric->Data()->SaveNrUeCellInfo(3, 10, 5, t);
+    }
+
+    void DoRun() override
+    {
+        // --- Sub-case 1: no Event A2 report -> the serving cell is fine, no HO ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a2a4-lm-1.db");
+
+            Ptr<OranLmNr2NrA2A4RsrpHandover> lm = CreateObject<OranLmNr2NrA2A4RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("NeighbourCellOffset", UintegerValue(1));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                // Only an Event A4 report, with a much stronger neighbour. Without
+                // the A2 report the first condition does not hold, so the strong
+                // neighbour must be ignored.
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 20,
+                                                 60,
+                                                 25,
+                                                 true,
+                                                 true,
+                                                 false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 1: without Event A2 there should be no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 2: A2 present, neighbour does not beat the offset -> no HO ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a2a4-lm-2.db");
+
+            Ptr<OranLmNr2NrA2A4RsrpHandover> lm = CreateObject<OranLmNr2NrA2A4RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("NeighbourCellOffset", UintegerValue(3));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                // Event A2: the serving cell dropped below the configured threshold.
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 1,
+                                                 OranReportNrGnbMeasReport::EVENT_A2,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                // Event A4: the neighbour is only 2 quantization steps better,
+                // which is below the offset of 3.
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 20,
+                                                 42,
+                                                 21,
+                                                 true,
+                                                 true,
+                                                 false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 2: neighbour below NeighbourCellOffset, no HO");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 3: both conditions hold -> handover to the best neighbour ---
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a2a4-lm-3.db");
+
+            Ptr<OranLmNr2NrA2A4RsrpHandover> lm = CreateObject<OranLmNr2NrA2A4RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("NeighbourCellOffset", UintegerValue(1));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            Simulator::Schedule(Seconds(0.1), [this, ric, lm]() {
+                SeedTopology(ric, Seconds(0.1));
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 1,
+                                                 OranReportNrGnbMeasReport::EVENT_A2,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                // 55 - 40 = 15, well above the offset of 1.
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 20,
+                                                 55,
+                                                 24,
+                                                 true,
+                                                 true,
+                                                 false);
+
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      1,
+                                      "Sub-case 3: should produce exactly 1 HO command");
+
+                Ptr<OranCommandNr2NrHandover> hoCmd =
+                    DynamicCast<OranCommandNr2NrHandover>(cmds.front());
+                NS_TEST_ASSERT_MSG_NE(hoCmd, nullptr, "Command should be OranCommandNr2NrHandover");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetCellId(),
+                                      20,
+                                      "HO should target gNB2 (cellId 20)");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetRnti(), 5, "HO should target RNTI 5");
+                NS_TEST_ASSERT_MSG_EQ(hoCmd->GetTargetE2NodeId(),
+                                      1,
+                                      "HO command should be sent to serving gNB (E2NodeId 1)");
+            });
+
+            Simulator::Stop(Seconds(0.2));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+
+        // --- Sub-case 4: the reports are older than MaxReportAge -> no HO ---
+        // The gNB handover algorithm has no equivalent of this: it caches the
+        // neighbour measurements for the whole simulation and never ages them.
+        {
+            Ptr<OranNearRtRic> ric = CreateNrTestRic("oran-test-nr-a2a4-lm-4.db");
+
+            Ptr<OranLmNr2NrA2A4RsrpHandover> lm = CreateObject<OranLmNr2NrA2A4RsrpHandover>();
+            lm->SetAttribute("NearRtRic", PointerValue(ric));
+            lm->SetAttribute("NeighbourCellOffset", UintegerValue(1));
+            lm->SetAttribute("MaxReportAge", TimeValue(Seconds(1)));
+            lm->SetAttribute("Verbose", BooleanValue(true));
+
+            // The same measurements as sub-case 3, which did trigger a handover.
+            Simulator::Schedule(Seconds(0.1), [this, ric]() {
+                SeedTopology(ric, Seconds(0.1));
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 1,
+                                                 OranReportNrGnbMeasReport::EVENT_A2,
+                                                 10,
+                                                 40,
+                                                 20,
+                                                 true,
+                                                 true,
+                                                 true);
+                ric->Data()->SaveNrGnbMeasReport(1,
+                                                 Seconds(0.1),
+                                                 100,
+                                                 5,
+                                                 2,
+                                                 OranReportNrGnbMeasReport::EVENT_A4,
+                                                 20,
+                                                 55,
+                                                 24,
+                                                 true,
+                                                 true,
+                                                 false);
+            });
+
+            // Run the Logic Module well after the reports have aged out.
+            Simulator::Schedule(Seconds(3.0), [this, lm]() {
+                lm->Activate();
+                auto cmds = lm->Run();
+                NS_TEST_ASSERT_MSG_EQ(cmds.size(),
+                                      0,
+                                      "Sub-case 4: reports older than MaxReportAge give no HO");
+            });
+
+            Simulator::Stop(Seconds(3.1));
+            Simulator::Run();
+            Simulator::Destroy();
+        }
+    }
+};
+
+/**
  * Verify the decision logic of OranLmNr2NrA3RsrpHandover, which reproduces the
  * decision of the ns3::NrA3RsrpHandoverAlgorithm gNB handover algorithm from the
  * RRC Measurement Reports captured at the gNB.
@@ -1206,6 +1491,7 @@ OranTestSuite::OranTestSuite()
     AddTestCase(new OranTestCaseNrRsrpLmMissingGnb, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceLmMissingGnb, Duration::QUICK);
     AddTestCase(new OranTestCaseNrDistanceHandover, Duration::QUICK);
+    AddTestCase(new OranTestCaseNrA2A4LmDecision, Duration::QUICK);
     AddTestCase(new OranTestCaseNrA3LmDecision, Duration::QUICK);
 }
 
